@@ -1,16 +1,227 @@
+/*
+  ████████████████████████████████████████████████████████████████████████
+  BLACK & GOLD DESIGN SYSTEM
+  ████████████████████████████████████████████████████████████████████████
+
+  Премиальная палитра инспирирована эстетикой швейцарских часов и
+  ювелирных украшений. Глубокий чёрный фон создаёт ощущение глубины
+  и серьёзности, антикварное золото добавляет тепла и ценности,
+  тёплый белый текст обеспечивает читаемость без холодного контраста.
+
+  Палитра намеренно сдержанная — без ярких цветов, без неона,
+  без агрессивных контрастов. Цель — создать ощущение премиального
+  инструмента, в котором приятно работать ежедневно.
+*/
+
+@import '@fontsource-variable/geist/index.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  /* ── ПОВЕРХНОСТИ ─────────────────────────────────────────────────────── */
+  /* Базовый фон — чистый чёрный с минимальной тёплой смягчённостью.
+     Отличается от абсолютной темноты на 2-3% яркости, что даёт
+     ощущение материального чёрного, а не выключенного экрана. */
+  --bg-base: #0a0a0a;
+
+  /* Карточки — едва светлее фона, чтобы создавать ощущение поднятости
+     без визуальной полосатости интерфейса. */
+  --bg-elevated: #141414;
+
+  /* Модальные окна и поднятые элементы — ещё на ступень светлее.
+     Плюс лёгкая тёплая нотка для ощущения подсветки. */
+  --bg-higher: #1c1c1a;
+
+  /* Стеклянный эффект для премиальных карточек */
+  --bg-glass: rgba(255, 255, 255, 0.025);
+
+  /* ── ГРАНИЦЫ ─────────────────────────────────────────────────────────── */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-gold-subtle: rgba(212, 175, 55, 0.15);
+  --border-gold: rgba(212, 175, 55, 0.30);
+
+  /* ── ТЕКСТ ───────────────────────────────────────────────────────────── */
+  /* Тёплый почти-белый — гармонирует с золотым акцентом и не утомляет */
+  --text-primary: #fafaf7;
+  --text-secondary: #a8a8a3;
+  --text-tertiary: #6b6b67;
+  --text-quaternary: #404040;
+
+  /* ── ЗОЛОТОЙ АКЦЕНТ ──────────────────────────────────────────────────── */
+  /* Антикварное золото — благородный приглушённый оттенок,
+     близкий к настоящему металлу с лёгкой патиной. */
+  --gold: #d4af37;
+  --gold-bright: #e8c860;       /* для hover-состояний */
+  --gold-soft: #c9a431;          /* для границ и акцентов */
+  --gold-bg-subtle: rgba(212, 175, 55, 0.06);
+  --gold-bg: rgba(212, 175, 55, 0.12);
+  --gold-bg-strong: rgba(212, 175, 55, 0.20);
+  --gold-glow: rgba(212, 175, 55, 0.40);
+
+  /* ── СОСТОЯНИЯ ───────────────────────────────────────────────────────── */
+  /* Все состояния приглушены, чтобы не разрушать благородную сдержанность.
+     Никаких ярких сигнальных цветов — только мягкие оттенки. */
+  --success: #6ee7a8;
+  --success-bg: rgba(110, 231, 168, 0.10);
+  --success-border: rgba(110, 231, 168, 0.25);
+
+  --warning: #f3d77b;
+  --warning-bg: rgba(243, 215, 123, 0.10);
+  --warning-border: rgba(243, 215, 123, 0.25);
+
+  --danger: #f8a3a3;
+  --danger-bg: rgba(248, 163, 163, 0.10);
+  --danger-border: rgba(248, 163, 163, 0.25);
+
+  --info: #93c5fd;
+  --info-bg: rgba(147, 197, 253, 0.10);
+  --info-border: rgba(147, 197, 253, 0.25);
+}
+
+/*
+  Базовые стили страницы. font-feature-settings включает табличные цифры
+  глобально — критично для финансовых интерфейсов: цифры разной формы
+  (4 и 1, например) занимают одинаковую ширину и выравниваются вертикально.
+  Также включаем стилистический набор ss01, который Geist использует для
+  альтернативных форм некоторых букв в более классическом начертании.
+*/
 html, body {
   margin: 0;
   padding: 0;
-  background: #080e1a;
-  color: white;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Geist Variable', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'tnum' 1, 'ss01' 1, 'cv11' 1;
+  letter-spacing: -0.011em;
 }
 
+/* Унаследуем шрифт во всех формах — иначе iOS подменит на свой системный */
 input, textarea, select, button {
   font-family: inherit;
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+}
+
+/* Моноширинный шрифт для случаев где нужна гарантированная фикс-ширина */
+.font-mono-tabular {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+  Глассморфизм-карточка — полупрозрачный фон с эффектом размытия.
+  Применяется к самым важным акцентным элементам интерфейса (KPI,
+  модалки), чтобы создать визуальный фокус без излишнего шума.
+*/
+.glass-card {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.012));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border-default);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.04),
+    0 1px 3px 0 rgba(0, 0, 0, 0.6);
+}
+
+/*
+  Премиум-карточка с золотым акцентом — для самых важных элементов.
+  Тонкая золотая обводка плюс мягкое свечение придают премиальный вид.
+*/
+.gold-card {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.04), rgba(212, 175, 55, 0.01));
+  border: 1px solid var(--border-gold-subtle);
+  box-shadow:
+    inset 0 1px 0 0 rgba(212, 175, 55, 0.06),
+    0 0 24px -8px rgba(212, 175, 55, 0.10);
+}
+
+/* ── АНИМАЦИИ ───────────────────────────────────────────────────────────── */
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-enter {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes gold-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.30); }
+  50% { box-shadow: 0 0 0 8px rgba(212, 175, 55, 0); }
+}
+
+/*
+  Скелетный загрузчик — серая «пустая» карточка, которая показывается
+  пока реальные данные ещё не пришли с сервера. Имеет анимацию
+  переливающегося градиента, что создаёт ощущение «загружается»
+  без необходимости показывать спиннер или текст.
+*/
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+  border-radius: 8px;
+}
+
+/*
+  Стилизация полосы прокрутки — тонкая золотистая на тёмном фоне.
+*/
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.10);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.25);
+}
+
+/* Цвет выделения текста — золотой полупрозрачный */
+::selection {
+  background: var(--gold-bg-strong);
+  color: var(--text-primary);
+}
+
+/*
+  Утилитарный класс для текста с золотым градиентом — используется
+  для логотипа и важных акцентов вроде заголовков премиальных секций.
+*/
+.text-gold-gradient {
+  background: linear-gradient(135deg, #d4af37 0%, #e8c860 50%, #c9a431 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/*
+  Утилитарный класс для интерактивных элементов с пружинящим
+  откликом при нажатии — кнопки, карточки.
+*/
+.spring-press {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.spring-press:active {
+  transform: scale(0.97);
 }
