@@ -1,16 +1,19 @@
 {
   "name": "daniil-dashboard",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.2.0",
   "type": "module",
-  "description": "Личный рабочий центр Даниила — проекты, финансы, аналитика. Подключён к Supabase.",
+  "description": "Личный рабочий центр Даниила. Black & Gold редизайн с расширенным функционалом — ссылки, контакты, поиск.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.1.0",
     "@supabase/supabase-js": "^2.45.4",
+    "framer-motion": "^11.11.17",
+    "lucide-react": "^0.460.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^2.13.0"
