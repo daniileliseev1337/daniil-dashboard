@@ -11,6 +11,10 @@ import {
   CircleAlert, Coffee, ShoppingCart, Pill, Music,
   Briefcase, Receipt, BadgeCheck, Loader2, Mail,
   Phone, Send, ExternalLink,
+  // ── v1.5: иконки для админ-панели, команды, клиентов, прав ──
+  ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck,
+  Building2, MapPin, Hash, Star, Activity, ScrollText, BookUser,
+  ChevronDown, IdCard, Phone as PhoneIcon,
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
@@ -122,17 +126,17 @@ function projectDbToJs(row) {
     notes:          row.notes || "",
     visibility:     row.visibility || "private",
     ownerId:        row.owner_id,
-    // Новые поля v1.2 — ссылки на материалы и контакты заказчика
-    // links хранится в БД как JSONB-массив объектов вида [{title, url}, ...]
+    // Поля v1.2 — ссылки и контакты
     links:          Array.isArray(row.links) ? row.links : [],
     clientPhone:    row.client_phone || "",
     clientEmail:    row.client_email || "",
     clientTelegram: row.client_telegram || "",
+    // Поля v1.5 — связь с записью клиента
+    clientId:       row.client_id || null,
   };
 }
 
 function projectJsToDb(p, ownerId) {
-  // Возвращаем только поля для записи в БД — без id (его генерирует БД при insert)
   return {
     name:             p.name || "Без названия",
     client:           p.client || null,
@@ -146,8 +150,6 @@ function projectJsToDb(p, ownerId) {
     notes:            p.notes || null,
     visibility:       p.visibility || "private",
     owner_id:         ownerId,
-    // Новые поля v1.2. Фильтруем links — оставляем только записи с непустым URL,
-    // и нормализуем к строгой структуре {title, url}.
     links: (Array.isArray(p.links) ? p.links : [])
       .filter(l => l && l.url && l.url.trim())
       .map(l => ({
@@ -157,6 +159,47 @@ function projectJsToDb(p, ownerId) {
     client_phone:     p.clientPhone ? p.clientPhone.trim() : null,
     client_email:     p.clientEmail ? p.clientEmail.trim() : null,
     client_telegram:  p.clientTelegram ? p.clientTelegram.trim().replace(/^@/, "") : null,
+    client_id:        p.clientId || null,
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// Маппинг записей клиентской базы (v1.5)
+// ────────────────────────────────────────────────────────────────────────
+function clientDbToJs(row) {
+  return {
+    id:          row.id,
+    ownerId:     row.owner_id,
+    name:        row.name || "",
+    phone:       row.phone || "",
+    email:       row.email || "",
+    telegram:    row.telegram || "",
+    clientType:  row.client_type || "individual",
+    category:    row.category || "regular",
+    legalName:   row.legal_name || "",
+    inn:         row.inn || "",
+    address:     row.address || "",
+    city:        row.city || "",
+    notes:       row.notes || "",
+    createdAt:   row.created_at,
+    updatedAt:   row.updated_at,
+  };
+}
+
+function clientJsToDb(c, ownerId) {
+  return {
+    owner_id:    ownerId,
+    name:        (c.name || "").trim() || "Без имени",
+    phone:       c.phone ? c.phone.trim() : null,
+    email:       c.email ? c.email.trim() : null,
+    telegram:    c.telegram ? c.telegram.trim().replace(/^@/, "") : null,
+    client_type: c.clientType || "individual",
+    category:    c.category || "regular",
+    legal_name:  c.legalName ? c.legalName.trim() : null,
+    inn:         c.inn ? c.inn.trim() : null,
+    address:     c.address ? c.address.trim() : null,
+    city:        c.city ? c.city.trim() : null,
+    notes:       c.notes ? c.notes.trim() : null,
   };
 }
 
@@ -285,6 +328,144 @@ async function updateTransaction(client, id, tx, ownerId) {
 async function deleteTransactionDb(client, id) {
   const { error } = await client.from("transactions").delete().eq("id", id);
   if (error) throw error;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLIENTS (v1.5) — операции с клиентской базой
+// ════════════════════════════════════════════════════════════════════════════
+
+async function fetchClients(client) {
+  const { data, error } = await client
+    .from("clients")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(clientDbToJs);
+}
+
+async function insertClient(client, c, ownerId) {
+  const dbObj = clientJsToDb(c, ownerId);
+  const { data, error } = await client
+    .from("clients")
+    .insert(dbObj)
+    .select()
+    .single();
+  if (error) throw error;
+  return clientDbToJs(data);
+}
+
+async function updateClient(client, id, c, ownerId) {
+  const dbObj = clientJsToDb(c, ownerId);
+  const { data, error } = await client
+    .from("clients")
+    .update(dbObj)
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return clientDbToJs(data);
+}
+
+async function deleteClientDb(client, id) {
+  const { error } = await client.from("clients").delete().eq("id", id);
+  if (error) throw error;
+}
+
+async function searchClientsByQuery(client, query) {
+  const { data, error } = await client.rpc("search_clients", { p_query: query || "" });
+  if (error) throw error;
+  return data || [];
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROJECT MEMBERS (v1.5) — управление командой проекта
+// ════════════════════════════════════════════════════════════════════════════
+
+async function fetchProjectMembers(client, projectId) {
+  const { data, error } = await client.rpc("get_project_members", { p_project_id: projectId });
+  if (error) throw error;
+  return data || [];
+}
+
+async function addProjectMember(client, projectId, userId, role = "viewer") {
+  const { data, error } = await client
+    .from("project_members")
+    .insert({ project_id: projectId, user_id: userId, role })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateProjectMemberRole(client, projectId, userId, role) {
+  const { error } = await client
+    .from("project_members")
+    .update({ role })
+    .eq("project_id", projectId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+async function removeProjectMember(client, projectId, userId) {
+  const { error } = await client
+    .from("project_members")
+    .delete()
+    .eq("project_id", projectId)
+    .eq("user_id", userId);
+  if (error) throw error;
+}
+
+async function searchApprovedUsers(client, query) {
+  const { data, error } = await client.rpc("search_approved_users", { p_query: query || "" });
+  if (error) throw error;
+  return data || [];
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN (v1.5) — административные операции
+// ════════════════════════════════════════════════════════════════════════════
+
+async function adminListUsers(client) {
+  const { data, error } = await client.rpc("admin_list_users");
+  if (error) throw error;
+  return data || [];
+}
+
+async function adminUpdateUser(client, userId, updates) {
+  const { error } = await client.rpc("admin_update_user", {
+    p_user_id: userId,
+    p_approved: updates.approved !== undefined ? updates.approved : null,
+    p_role: updates.role || null,
+    p_name: updates.name !== undefined ? updates.name : null,
+  });
+  if (error) throw error;
+}
+
+async function adminDeleteUser(client, userId) {
+  const { error } = await client.rpc("admin_delete_user", { p_user_id: userId });
+  if (error) throw error;
+}
+
+async function adminSystemStats(client) {
+  const { data, error } = await client.rpc("admin_system_stats");
+  if (error) throw error;
+  return data || {};
+}
+
+async function adminFetchActivityLog(client, limit = 50) {
+  const { data, error } = await client
+    .from("activity_log")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function fetchTopClients(client, limit = 5) {
+  const { data, error } = await client.rpc("top_clients", { p_limit: limit });
+  if (error) throw error;
+  return data || [];
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1003,14 +1184,16 @@ function AuthScreen({ onAuthenticated, onError }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECT FORM
 // ════════════════════════════════════════════════════════════════════════════
-function ProjectForm({ initial, onSave, onClose, saving }) {
+function ProjectForm({ initial, onSave, onClose, saving, client, profile, showToast, isOwner }) {
   const [f, setF] = useState(initial || {
     name: "", client: "", executor: "", type: "ОВиК", stage: "Переговоры",
     startDate: todayStr(), deadline: "", contractSum: "", paidAmount: "", notes: "",
     visibility: "private",
-    // Новые поля v1.2 — список ссылок на материалы и контактные данные заказчика
+    // v1.2 поля
     links: [],
     clientPhone: "", clientEmail: "", clientTelegram: "",
+    // v1.5 поля
+    clientId: null,
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -1036,8 +1219,31 @@ function ProjectForm({ initial, onSave, onClose, saving }) {
           placeholder="Н-р: ОВиК Жилой дом пер. Строителей" />
       </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div><Label>Заказчик / Клиент</Label>
-          <StyledInput value={f.client} onChange={e => s("client", e.target.value)} /></div>
+        <div>
+          <Label>Заказчик / Клиент</Label>
+          {client ? (
+            <ClientSelector
+              value={f.client}
+              clientId={f.clientId}
+              onSelect={(v) => s("client", v)}
+              onClear={() => s("clientId", null)}
+              client={client}
+              onClientPicked={(picked) => {
+                // При выборе клиента из базы автозаполняем контакты
+                setF(p => ({
+                  ...p,
+                  client: picked.name,
+                  clientId: picked.id,
+                  clientPhone: picked.phone || p.clientPhone,
+                  clientEmail: picked.email || p.clientEmail,
+                  clientTelegram: picked.telegram || p.clientTelegram,
+                }));
+              }}
+            />
+          ) : (
+            <StyledInput value={f.client} onChange={e => s("client", e.target.value)} />
+          )}
+        </div>
         <div><Label>Исполнитель</Label>
           <StyledInput value={f.executor} onChange={e => s("executor", e.target.value)}
             placeholder="Н-р: Даниил, Субподряд" /></div>
@@ -1207,6 +1413,34 @@ function ProjectForm({ initial, onSave, onClose, saving }) {
           <option value="team">Командный (видят все одобренные)</option>
         </StyledSelect>
       </Field>
+
+      {/* ═══ СЕКЦИЯ: Команда проекта (v1.5) ═══ */}
+      {initial && initial.id && client && (
+        <div style={{
+          marginBottom: 14, padding: "12px 14px",
+          background: "rgba(212,175,55,0.04)",
+          border: "1px solid rgba(212,175,55,0.12)",
+          borderRadius: 10,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 11, fontWeight: 600, color: "#d4af37",
+            textTransform: "uppercase", letterSpacing: "0.10em",
+            marginBottom: 12,
+          }}>
+            <Users size={12} strokeWidth={2.4} />
+            Команда проекта
+          </div>
+          <MembersManager
+            projectId={initial.id}
+            profile={profile}
+            client={client}
+            showToast={showToast}
+            canManage={isOwner || profile?.role === "admin"}
+          />
+        </div>
+      )}
+
       <Field label="Примечания">
         <StyledTextarea rows={2} value={f.notes} onChange={e => s("notes", e.target.value)} />
       </Field>
@@ -1505,7 +1739,7 @@ function Dashboard({ projects, txs }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECTS — список + CRUD через Supabase
 // ════════════════════════════════════════════════════════════════════════════
-function Projects({ projects, setProjects, client, ownerId, showToast }) {
+function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast }) {
   const [modal, setModal]             = useState(null);
   const [stageFilter, setStageFilter] = useState("Все");
   const [confirmDel, setConfirmDel]   = useState(null);
@@ -1577,8 +1811,12 @@ function Projects({ projects, setProjects, client, ownerId, showToast }) {
                       <span style={{color:"white",fontWeight:700,fontSize:15}}>{p.name}</span>
                       <span style={{fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:600,
                         background:meta.color+"22",color:meta.color}}>{p.stage}</span>
-                      {p.visibility==="team" && <span style={{fontSize:10,padding:"1px 6px",borderRadius:10,
-                        background:"#d4af3722",color:"#d4af37",fontWeight:600}}>👥 команда</span>}
+                      <PermissionBadge role={
+                        p.ownerId === profile?.id ? "owner"
+                          : profile?.role === "admin" ? "admin"
+                          : p.visibility === "team" ? "viewer"
+                          : null
+                      } />
                       {isAwaitingPayment&&<span style={{fontSize:11,color:"#d4af37",fontWeight:600}}>⏳ Ожидает оплаты</span>}
                       {isOverdue&&<span style={{fontSize:11,color:"#f8a3a3",fontWeight:600}}>⚠ Просрочен</span>}
                     </div>
@@ -1773,7 +2011,16 @@ function Projects({ projects, setProjects, client, ownerId, showToast }) {
 
       {modal&&(
         <Modal title={modal==="add"?"Новый проект":"Редактировать проект"} onClose={()=>!saving&&setModal(null)}>
-          <ProjectForm initial={modal==="add"?null:modal} onSave={saveProject} onClose={()=>setModal(null)} saving={saving}/>
+          <ProjectForm
+            initial={modal === "add" ? null : modal}
+            onSave={saveProject}
+            onClose={() => setModal(null)}
+            saving={saving}
+            client={client}
+            profile={profile}
+            showToast={showToast}
+            isOwner={modal === "add" || (modal && modal.ownerId === profile?.id)}
+          />
         </Modal>
       )}
     </div>
@@ -2719,6 +2966,1232 @@ function Empty({ text }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// v1.5: ВСПОМОГАТЕЛЬНЫЕ ХУКИ И КОМПОНЕНТЫ
+// ════════════════════════════════════════════════════════════════════════════
+
+// Хук определения роли текущего пользователя на конкретном проекте.
+// Возвращает один из: "owner" | "admin" | "editor" | "viewer" | "none"
+function useProjectRole(project, profile, projectMembers) {
+  if (!project || !profile) return "none";
+  if (project.ownerId === profile.id) return "owner";
+  if (profile.role === "admin") return "admin";
+  const m = (projectMembers || []).find(pm => pm.user_id === profile.id);
+  if (m) return m.member_role === "editor" ? "editor" : "viewer";
+  if (project.visibility === "team") return "viewer";
+  return "none";
+}
+
+// Бейдж роли пользователя на проекте — отображается в правом верхнем углу карточки
+function PermissionBadge({ role }) {
+  const config = {
+    owner:  { label: "Мой",                Icon: Crown,       color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
+    admin:  { label: "Admin",              Icon: ShieldCheck, color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
+    editor: { label: "Команда · редактор", Icon: PencilLine,  color: "#6ee7a8", bg: "rgba(110,231,168,0.10)", border: "rgba(110,231,168,0.25)" },
+    viewer: { label: "Команда",            Icon: Users,       color: "#93c5fd", bg: "rgba(147,197,253,0.10)", border: "rgba(147,197,253,0.25)" },
+  };
+  const c = config[role];
+  if (!c) return null;
+  const { label, Icon, color, bg, border } = c;
+  return (
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 4,
+      padding: "2px 8px", borderRadius: 6,
+      background: bg, border: `1px solid ${border}`,
+      color, fontSize: 10, fontWeight: 600,
+      letterSpacing: "0.04em",
+      whiteSpace: "nowrap",
+    }}>
+      <Icon size={10} strokeWidth={2.4} />
+      {label}
+    </span>
+  );
+}
+
+// Аватар-инициалы для отображения участника команды
+function UserAvatar({ name, email, size = 28 }) {
+  const initials = (name || email || "?").trim()
+    .split(/\s+/).slice(0, 2).map(s => s[0] || "").join("").toUpperCase() || "?";
+  return (
+    <span
+      title={name || email}
+      style={{
+        width: size, height: size, borderRadius: "50%",
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(212,175,55,0.10)",
+        border: "1px solid rgba(212,175,55,0.30)",
+        color: "#d4af37",
+        fontSize: Math.round(size * 0.42),
+        fontWeight: 600,
+        letterSpacing: "-0.02em",
+        flexShrink: 0,
+      }}
+    >{initials}</span>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLIENT SELECTOR — выпадающий выбор клиента в форме проекта (v1.5)
+// ════════════════════════════════════════════════════════════════════════════
+// Гибридная логика: позволяет либо выбрать существующего клиента из базы
+// (при этом контакты автозаполняются), либо ввести имя вручную как раньше.
+function ClientSelector({ value, clientId, onSelect, onClear, client, onClientPicked }) {
+  const [query, setQuery] = useState(value || "");
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounceTimer = useRef(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => { setQuery(value || ""); }, [value]);
+
+  useEffect(() => {
+    const onClickOutside = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const loadSuggestions = async (q) => {
+    setLoading(true);
+    try {
+      const list = await searchClientsByQuery(client, q);
+      setSuggestions(list);
+    } catch {
+      setSuggestions([]);
+    }
+    setLoading(false);
+  };
+
+  const handleChange = (v) => {
+    setQuery(v);
+    onSelect(v);
+    if (clientId) onClear();
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      loadSuggestions(v);
+      setOpen(true);
+    }, 200);
+  };
+
+  const pickSuggestion = (s) => {
+    setQuery(s.name);
+    onSelect(s.name);
+    onClientPicked(s);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <StyledInput
+        value={query}
+        onChange={e => handleChange(e.target.value)}
+        onFocus={() => { if (query.length === 0) loadSuggestions(""); setOpen(true); }}
+        placeholder="Имя или название организации"
+        style={clientId ? {
+          paddingRight: 32,
+          borderColor: "#d4af37",
+          boxShadow: "0 0 0 3px rgba(212,175,55,0.18)",
+        } : {}}
+      />
+      {clientId && (
+        <span
+          title="Привязан к клиенту из базы"
+          style={{
+            position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)",
+            color: "#d4af37", display: "flex", alignItems: "center",
+            pointerEvents: "none",
+          }}
+        >
+          <BadgeCheck size={14} strokeWidth={2.2} />
+        </span>
+      )}
+      {open && suggestions.length > 0 && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0,
+          background: "#1c1c1a",
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: 10,
+          boxShadow: "0 12px 28px rgba(0,0,0,0.5)",
+          zIndex: 50,
+          maxHeight: 240,
+          overflowY: "auto",
+        }}>
+          {suggestions.map(s => (
+            <div
+              key={s.id}
+              onMouseDown={(e) => { e.preventDefault(); pickSuggestion(s); }}
+              style={{
+                padding: "10px 12px",
+                cursor: "pointer",
+                borderBottom: "1px solid rgba(255,255,255,0.04)",
+                display: "flex", alignItems: "center", gap: 10,
+                transition: "background 0.15s",
+              }}
+              onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.06)"}
+              onMouseOut={e => e.currentTarget.style.background = "transparent"}
+            >
+              <UserAvatar name={s.name} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, color: "#fafaf7", fontWeight: 500 }}>{s.name}</div>
+                {(s.legal_name || s.phone || s.email) && (
+                  <div style={{ fontSize: 11, color: "#a8a8a3", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {s.legal_name && <span>{s.legal_name}</span>}
+                    {s.legal_name && (s.phone || s.email) && <span style={{ margin: "0 6px", color: "#404040" }}>·</span>}
+                    {s.phone && <span>{s.phone}</span>}
+                    {s.phone && s.email && <span style={{ margin: "0 6px", color: "#404040" }}>·</span>}
+                    {s.email && <span>{s.email}</span>}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MEMBERS MANAGER — секция управления командой проекта (v1.5)
+// ════════════════════════════════════════════════════════════════════════════
+function MembersManager({ projectId, profile, client, showToast, canManage }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [selectedRole, setSelectedRole] = useState("editor");
+  const [selectedUser, setSelectedUser] = useState(null);
+
+  const reload = async () => {
+    if (!projectId) { setMembers([]); setLoading(false); return; }
+    setLoading(true);
+    try {
+      const list = await fetchProjectMembers(client, projectId);
+      setMembers(list);
+    } catch (e) {
+      showToast("Не удалось загрузить команду: " + (e.message || ""), "error");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [projectId]);
+
+  const doSearch = async (q) => {
+    setSearchQuery(q);
+    if (!q || q.length < 2) { setSearchResults([]); return; }
+    try {
+      const list = await searchApprovedUsers(client, q);
+      const memberIds = new Set(members.map(m => m.user_id));
+      setSearchResults(list.filter(u => !memberIds.has(u.id)));
+    } catch {
+      setSearchResults([]);
+    }
+  };
+
+  const doInvite = async () => {
+    if (!selectedUser) return;
+    try {
+      await addProjectMember(client, projectId, selectedUser.id, selectedRole);
+      showToast(`✓ ${selectedUser.name || selectedUser.email} приглашён(а)`);
+      setSelectedUser(null);
+      setSearchQuery("");
+      setSearchResults([]);
+      setAdding(false);
+      reload();
+    } catch (e) {
+      showToast("Ошибка приглашения: " + (e.message || ""), "error");
+    }
+  };
+
+  const doRemove = async (userId) => {
+    try {
+      await removeProjectMember(client, projectId, userId);
+      showToast("Участник удалён");
+      reload();
+    } catch (e) {
+      showToast("Ошибка удаления: " + (e.message || ""), "error");
+    }
+  };
+
+  const doChangeRole = async (userId, newRole) => {
+    try {
+      await updateProjectMemberRole(client, projectId, userId, newRole);
+      reload();
+    } catch (e) {
+      showToast("Ошибка смены роли: " + (e.message || ""), "error");
+    }
+  };
+
+  if (!projectId) {
+    return (
+      <div style={{ fontSize: 11, color: "#6b6b67", fontStyle: "italic", textAlign: "center", padding: "12px 0" }}>
+        Команду можно настроить после первого сохранения проекта
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {loading ? (
+        <div style={{ fontSize: 11, color: "#6b6b67", textAlign: "center", padding: "10px 0" }}>Загружаем...</div>
+      ) : members.length === 0 && !adding ? (
+        <div style={{ fontSize: 11, color: "#6b6b67", textAlign: "center", padding: "8px 0", fontStyle: "italic" }}>
+          В проекте пока только владелец
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 8 }}>
+          {members.map(m => (
+            <div key={m.user_id} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 10px", borderRadius: 8,
+              background: "rgba(255,255,255,0.025)",
+              border: "1px solid rgba(255,255,255,0.06)",
+            }}>
+              <UserAvatar name={m.name} email={m.email} size={28} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: "#fafaf7", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.name || m.email.split("@")[0]}
+                </div>
+                <div style={{ fontSize: 10, color: "#6b6b67", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.email}
+                </div>
+              </div>
+              {canManage ? (
+                <>
+                  <select
+                    value={m.member_role}
+                    onChange={e => doChangeRole(m.user_id, e.target.value)}
+                    style={{
+                      ...BASE_INPUT, width: "auto", padding: "3px 6px",
+                      fontSize: 10, fontWeight: 600,
+                    }}
+                  >
+                    <option value="viewer">Просмотр</option>
+                    <option value="editor">Редактор</option>
+                  </select>
+                  <button
+                    onClick={() => doRemove(m.user_id)}
+                    style={{
+                      background: "transparent", border: "none", color: "#6b6b67",
+                      cursor: "pointer", padding: 4, display: "flex",
+                    }}
+                    onMouseOver={e => e.currentTarget.style.color = "#f8a3a3"}
+                    onMouseOut={e => e.currentTarget.style.color = "#6b6b67"}
+                    title="Удалить из команды"
+                  >
+                    <UserMinus size={14} strokeWidth={2.2} />
+                  </button>
+                </>
+              ) : (
+                <span style={{
+                  fontSize: 10, fontWeight: 600,
+                  padding: "2px 8px", borderRadius: 5,
+                  background: m.member_role === "editor" ? "rgba(110,231,168,0.10)" : "rgba(147,197,253,0.10)",
+                  color: m.member_role === "editor" ? "#6ee7a8" : "#93c5fd",
+                  border: `1px solid ${m.member_role === "editor" ? "rgba(110,231,168,0.25)" : "rgba(147,197,253,0.25)"}`,
+                }}>
+                  {m.member_role === "editor" ? "Редактор" : "Просмотр"}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {canManage && (
+        <>
+          {!adding ? (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              style={{
+                fontSize: 11, padding: "5px 12px", borderRadius: 7,
+                background: "rgba(212,175,55,0.12)",
+                border: "1px solid rgba(212,175,55,0.30)",
+                color: "#d4af37", cursor: "pointer", fontWeight: 500,
+                display: "inline-flex", alignItems: "center", gap: 5,
+                fontFamily: "inherit",
+              }}
+            >
+              <UserPlus size={11} strokeWidth={2.4} /> Пригласить
+            </button>
+          ) : (
+            <div style={{
+              padding: 10, borderRadius: 8,
+              background: "rgba(212,175,55,0.04)",
+              border: "1px solid rgba(212,175,55,0.20)",
+            }}>
+              <StyledInput
+                value={searchQuery}
+                onChange={e => doSearch(e.target.value)}
+                placeholder="Поиск по email или имени..."
+                style={{ fontSize: 12, padding: "6px 10px", marginBottom: 8 }}
+                autoFocus
+              />
+              {searchResults.length > 0 && (
+                <div style={{ marginBottom: 8, maxHeight: 180, overflowY: "auto", borderRadius: 6, background: "rgba(0,0,0,0.20)" }}>
+                  {searchResults.map(u => (
+                    <div
+                      key={u.id}
+                      onClick={() => setSelectedUser(u)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "6px 10px", cursor: "pointer",
+                        background: selectedUser?.id === u.id ? "rgba(212,175,55,0.12)" : "transparent",
+                        transition: "background 0.15s",
+                      }}
+                    >
+                      <UserAvatar name={u.name} email={u.email} size={22} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, color: "#fafaf7" }}>{u.name || u.email.split("@")[0]}</div>
+                        <div style={{ fontSize: 10, color: "#6b6b67" }}>{u.email}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {selectedUser && (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontSize: 10, color: "#a8a8a3" }}>Роль:</span>
+                  {["viewer", "editor"].map(r => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setSelectedRole(r)}
+                      style={{
+                        padding: "3px 10px", borderRadius: 5, cursor: "pointer", fontSize: 10, fontWeight: 600,
+                        background: selectedRole === r ? "rgba(212,175,55,0.20)" : "transparent",
+                        border: `1px solid ${selectedRole === r ? "rgba(212,175,55,0.40)" : "rgba(255,255,255,0.10)"}`,
+                        color: selectedRole === r ? "#d4af37" : "#a8a8a3",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {r === "viewer" ? "Просмотр" : "Редактор"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => { setAdding(false); setSelectedUser(null); setSearchQuery(""); setSearchResults([]); }}
+                  style={{
+                    flex: 1, padding: "5px 10px", borderRadius: 6,
+                    background: "transparent", border: "1px solid rgba(255,255,255,0.10)",
+                    color: "#a8a8a3", cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+                  }}
+                >Отмена</button>
+                <button
+                  type="button"
+                  onClick={doInvite}
+                  disabled={!selectedUser}
+                  style={{
+                    flex: 1, padding: "5px 10px", borderRadius: 6,
+                    background: selectedUser ? "#d4af37" : "rgba(212,175,55,0.20)",
+                    border: "none", color: "#0a0a0a",
+                    cursor: selectedUser ? "pointer" : "default",
+                    fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                    opacity: selectedUser ? 1 : 0.5,
+                  }}
+                >Пригласить</button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLIENT FORM — форма создания/редактирования клиента (v1.5)
+// ════════════════════════════════════════════════════════════════════════════
+function ClientForm({ initial, onSave, onClose, saving }) {
+  const [f, setF] = useState(initial || {
+    name: "", phone: "", email: "", telegram: "",
+    clientType: "individual", category: "regular",
+    legalName: "", inn: "", address: "", city: "", notes: "",
+  });
+  const s = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  return (
+    <div>
+      <Field label="Имя клиента *">
+        <StyledInput value={f.name} onChange={e => s("name", e.target.value)}
+          placeholder="ФИО или название организации" autoFocus />
+      </Field>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <Label>Тип клиента</Label>
+          <StyledSelect value={f.clientType} onChange={e => s("clientType", e.target.value)}>
+            <option value="individual">Физлицо</option>
+            <option value="legal">Юрлицо</option>
+            <option value="state">Госучреждение</option>
+          </StyledSelect>
+        </div>
+        <div>
+          <Label>Категория</Label>
+          <StyledSelect value={f.category} onChange={e => s("category", e.target.value)}>
+            <option value="regular">Постоянный</option>
+            <option value="one-time">Разовый</option>
+            <option value="potential">Потенциальный</option>
+            <option value="archived">Архив</option>
+          </StyledSelect>
+        </div>
+      </div>
+
+      {/* Основные контакты */}
+      <div style={{
+        marginBottom: 14, padding: "12px 14px",
+        background: "rgba(212,175,55,0.04)",
+        border: "1px solid rgba(212,175,55,0.12)",
+        borderRadius: 10,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: 11, fontWeight: 600, color: "#d4af37",
+          textTransform: "uppercase", letterSpacing: "0.10em",
+          marginBottom: 12,
+        }}>
+          <PhoneIcon size={12} strokeWidth={2.4} /> Контакты
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <Label>Телефон</Label>
+            <StyledInput type="tel" value={f.phone} onChange={e => s("phone", e.target.value)} placeholder="+7 999 123-45-67" />
+          </div>
+          <div>
+            <Label>Email</Label>
+            <StyledInput type="email" value={f.email} onChange={e => s("email", e.target.value)} placeholder="client@example.com" />
+          </div>
+        </div>
+        <div>
+          <Label>Telegram (без @)</Label>
+          <StyledInput value={f.telegram} onChange={e => s("telegram", e.target.value)} placeholder="username" />
+        </div>
+      </div>
+
+      {/* Юридические реквизиты — все опциональны */}
+      <div style={{
+        marginBottom: 14, padding: "12px 14px",
+        background: "rgba(255,255,255,0.025)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 10,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: 11, fontWeight: 600, color: "#a8a8a3",
+          textTransform: "uppercase", letterSpacing: "0.10em",
+          marginBottom: 12,
+        }}>
+          <Building2 size={12} strokeWidth={2.4} /> Реквизиты <span style={{ color: "#6b6b67", fontWeight: 400 }}>(необязательно)</span>
+        </div>
+        <Field label="Юридическое название">
+          <StyledInput value={f.legalName} onChange={e => s("legalName", e.target.value)}
+            placeholder='ООО "Стройинвест"' />
+        </Field>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <Label>ИНН</Label>
+            <StyledInput value={f.inn} onChange={e => s("inn", e.target.value)} placeholder="7700000000" />
+          </div>
+          <div>
+            <Label>Город</Label>
+            <StyledInput value={f.city} onChange={e => s("city", e.target.value)} placeholder="Москва" />
+          </div>
+        </div>
+        <Field label="Адрес">
+          <StyledInput value={f.address} onChange={e => s("address", e.target.value)} placeholder="ул. ..., д. ..." />
+        </Field>
+      </div>
+
+      <Field label="Заметки">
+        <StyledTextarea rows={2} value={f.notes} onChange={e => s("notes", e.target.value)} placeholder="Особенности работы, важные детали..." />
+      </Field>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Отмена</button>
+        <button onClick={() => onSave(f)} className={BTN.primary} style={{ flex: 2, opacity: saving ? 0.6 : 1 }} disabled={saving}>
+          {saving ? "Сохраняем..." : "Сохранить"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// CLIENTS PAGE — вкладка "Заказчики" (v1.5)
+// ════════════════════════════════════════════════════════════════════════════
+function ClientsPage({ clients, setClients, projects, client, ownerId, showToast }) {
+  const [modal, setModal] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const saveClient = async (form) => {
+    setSaving(true);
+    try {
+      if (modal === "add") {
+        const created = await insertClient(client, form, ownerId);
+        setClients(prev => [created, ...prev].sort((a, b) => a.name.localeCompare(b.name, "ru")));
+        showToast("✓ Клиент добавлен");
+      } else {
+        const updated = await updateClient(client, modal.id, form, ownerId);
+        setClients(prev => prev.map(c => c.id === updated.id ? updated : c)
+          .sort((a, b) => a.name.localeCompare(b.name, "ru")));
+        showToast("✓ Клиент обновлён");
+      }
+      setModal(null);
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const del = async (id) => {
+    if (confirmDel !== id) { setConfirmDel(id); return; }
+    try {
+      await deleteClientDb(client, id);
+      setClients(prev => prev.filter(c => c.id !== id));
+      showToast("Клиент удалён");
+    } catch (e) {
+      showToast("Ошибка удаления: " + (e.message || ""), "error");
+    } finally {
+      setConfirmDel(null);
+    }
+  };
+
+  // Подсчёт статистики по каждому клиенту через присоединение projects
+  const clientsWithStats = clients.map(c => {
+    const clientProjects = projects.filter(p => p.clientId === c.id);
+    return {
+      ...c,
+      projectsCount: clientProjects.length,
+      activeCount: clientProjects.filter(p => !["Оплачен", "Архив"].includes(p.stage)).length,
+      totalSum: clientProjects.reduce((s, p) => s + (+p.contractSum || 0), 0),
+      totalPaid: clientProjects.reduce((s, p) => s + (+p.paidAmount || 0), 0),
+    };
+  });
+
+  const visible = clientsWithStats
+    .filter(c => filterType === "all" || c.clientType === filterType)
+    .filter(c => !search ||
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.legalName || "").toLowerCase().includes(search.toLowerCase()) ||
+      (c.phone || "").includes(search) ||
+      (c.email || "").toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, alignItems: "center" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 360 }}>
+          <Search size={14} strokeWidth={2.2} style={{
+            position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+            color: "#6b6b67", pointerEvents: "none",
+          }} />
+          <StyledInput
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск по имени, реквизитам, контактам..."
+            style={{ paddingLeft: 36 }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[
+            ["all", "Все"], ["individual", "Физлица"], ["legal", "Юрлица"], ["state", "Гос."],
+          ].map(([v, l]) => (
+            <Chip key={v} label={l} active={filterType === v} onClick={() => setFilterType(v)} />
+          ))}
+        </div>
+        <button onClick={() => setModal("add")} className={BTN.primary} style={{ marginLeft: "auto" }}>
+          + Новый клиент
+        </button>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {visible.length === 0 ? (
+          <Empty text={
+            clients.length === 0
+              ? "Пока нет клиентов — нажми «Новый клиент»"
+              : "Никто не подходит под фильтр"
+          } />
+        ) : visible.map(c => (
+          <div key={c.id} style={{
+            background: "#141414",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 14, padding: 16,
+            transition: "border-color 0.18s",
+          }}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
+              <UserAvatar name={c.name} size={42} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                  <span style={{ color: "#fafaf7", fontWeight: 600, fontSize: 15 }}>{c.name}</span>
+                  {c.clientType === "legal" && (
+                    <span style={{
+                      fontSize: 10, padding: "1px 7px", borderRadius: 5, fontWeight: 600,
+                      background: "rgba(147,197,253,0.10)", color: "#93c5fd",
+                      border: "1px solid rgba(147,197,253,0.25)",
+                    }}>ЮРЛИЦО</span>
+                  )}
+                  {c.clientType === "state" && (
+                    <span style={{
+                      fontSize: 10, padding: "1px 7px", borderRadius: 5, fontWeight: 600,
+                      background: "rgba(212,175,55,0.10)", color: "#d4af37",
+                      border: "1px solid rgba(212,175,55,0.25)",
+                    }}>ГОС.</span>
+                  )}
+                  {c.category === "potential" && (
+                    <span style={{ fontSize: 10, color: "#f3d77b", fontWeight: 600 }}>· Потенциальный</span>
+                  )}
+                  {c.category === "archived" && (
+                    <span style={{ fontSize: 10, color: "#6b6b67", fontWeight: 600 }}>· Архив</span>
+                  )}
+                </div>
+                {c.legalName && (
+                  <div style={{ fontSize: 12, color: "#a8a8a3", marginBottom: 6 }}>{c.legalName}</div>
+                )}
+                {(c.city || c.address) && (
+                  <div style={{ fontSize: 11, color: "#6b6b67", marginBottom: 8, display: "flex", alignItems: "center", gap: 4 }}>
+                    <MapPin size={11} strokeWidth={2.2} />
+                    {[c.city, c.address].filter(Boolean).join(", ")}
+                  </div>
+                )}
+
+                {/* Контакты */}
+                {(c.phone || c.email || c.telegram) && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                    {c.phone && (
+                      <a href={`tel:${c.phone.replace(/\s+/g, "")}`}
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 5,
+                          padding: "4px 10px", borderRadius: 6,
+                          background: "rgba(212,175,55,0.06)",
+                          border: "1px solid rgba(212,175,55,0.20)",
+                          color: "#d4af37", fontSize: 11, fontWeight: 500,
+                          textDecoration: "none",
+                        }}>
+                        <Phone size={11} strokeWidth={2.2} /> {c.phone}
+                      </a>
+                    )}
+                    {c.email && (
+                      <a href={`mailto:${c.email}`}
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 5,
+                          padding: "4px 10px", borderRadius: 6,
+                          background: "rgba(212,175,55,0.06)",
+                          border: "1px solid rgba(212,175,55,0.20)",
+                          color: "#d4af37", fontSize: 11, fontWeight: 500,
+                          textDecoration: "none",
+                        }}>
+                        <Mail size={11} strokeWidth={2.2} /> {c.email}
+                      </a>
+                    )}
+                    {c.telegram && (
+                      <a href={`https://t.me/${c.telegram.replace(/^@/, "")}`}
+                        target="_blank" rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 5,
+                          padding: "4px 10px", borderRadius: 6,
+                          background: "rgba(212,175,55,0.06)",
+                          border: "1px solid rgba(212,175,55,0.20)",
+                          color: "#d4af37", fontSize: 11, fontWeight: 500,
+                          textDecoration: "none",
+                        }}>
+                        <Send size={11} strokeWidth={2.2} /> @{c.telegram.replace(/^@/, "")}
+                      </a>
+                    )}
+                  </div>
+                )}
+
+                {/* Статистика */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px", fontSize: 11, color: "#a8a8a3" }}>
+                  <span>Проектов: <span style={{ color: "#fafaf7", fontWeight: 600 }}>{c.projectsCount}</span></span>
+                  {c.activeCount > 0 && (
+                    <span>Активных: <span style={{ color: "#d4af37", fontWeight: 600 }}>{c.activeCount}</span></span>
+                  )}
+                  {c.totalSum > 0 && (
+                    <span>Сумма договоров: <span style={{ color: "#fafaf7", fontWeight: 600 }}>{fmt(c.totalSum)}</span></span>
+                  )}
+                  {c.totalPaid > 0 && (
+                    <span>Оплачено: <span style={{ color: "#6ee7a8", fontWeight: 600 }}>{fmt(c.totalPaid)}</span></span>
+                  )}
+                </div>
+
+                {c.notes && (
+                  <div style={{ fontSize: 11, color: "#6b6b67", fontStyle: "italic", marginTop: 8 }}>{c.notes}</div>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                <button onClick={() => setModal(c)} className={BTN.edit} title="Редактировать">
+                  <Pencil size={14} strokeWidth={2.2} />
+                </button>
+                <button
+                  onClick={() => { if (confirmDel === c.id) { del(c.id); } else { setConfirmDel(c.id); } }}
+                  onBlur={() => setConfirmDel(null)}
+                  title={confirmDel === c.id ? "Нажми ещё раз чтобы удалить" : "Удалить клиента"}
+                  style={{
+                    padding: "4px 8px", borderRadius: 6, border: "none", cursor: "pointer",
+                    fontSize: 12, fontWeight: 700, transition: "all .15s",
+                    background: confirmDel === c.id ? "rgba(248,163,163,0.20)" : "transparent",
+                    color: confirmDel === c.id ? "#f8a3a3" : "#6b6b67",
+                  }}
+                >
+                  {confirmDel === c.id ? <Check size={14} strokeWidth={2.4} /> : <Trash2 size={14} strokeWidth={2.2} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {modal && (
+        <Modal
+          title={modal === "add" ? "Новый клиент" : "Редактировать клиента"}
+          onClose={() => !saving && setModal(null)}
+          icon={<BookUser size={16} />}
+          maxWidth={560}
+        >
+          <ClientForm
+            initial={modal === "add" ? null : modal}
+            onSave={saveClient}
+            onClose={() => setModal(null)}
+            saving={saving}
+          />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROFILE MODAL — настройки своего профиля (v1.5)
+// ════════════════════════════════════════════════════════════════════════════
+function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast }) {
+  const [name, setName] = useState(profile?.name || "");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const { data, error } = await client
+        .from("profiles")
+        .update({ name: name.trim() || null })
+        .eq("id", profile.id)
+        .select()
+        .single();
+      if (error) throw error;
+      onProfileUpdated(data);
+      showToast("✓ Профиль обновлён");
+      onClose();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      title="Мой профиль"
+      onClose={() => !saving && onClose()}
+      icon={<User size={16} />}
+      maxWidth={460}
+    >
+      <div style={{
+        display: "flex", alignItems: "center", gap: 14, marginBottom: 18,
+        padding: "12px 14px", borderRadius: 12,
+        background: "rgba(212,175,55,0.04)",
+        border: "1px solid rgba(212,175,55,0.12)",
+      }}>
+        <UserAvatar name={name || profile?.email} size={46} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#fafaf7", letterSpacing: "-0.01em" }}>
+            {name || profile?.email?.split("@")[0]}
+          </div>
+          <div style={{ fontSize: 11, color: "#a8a8a3", marginTop: 2 }}>{profile?.email}</div>
+        </div>
+        {profile?.role === "admin" && (
+          <span style={{
+            fontSize: 10, padding: "3px 8px", borderRadius: 6, fontWeight: 600,
+            background: "rgba(212,175,55,0.12)", color: "#d4af37",
+            border: "1px solid rgba(212,175,55,0.25)",
+            display: "flex", alignItems: "center", gap: 4,
+          }}>
+            <Sparkles size={10} strokeWidth={2.4} /> ADMIN
+          </span>
+        )}
+      </div>
+
+      <Field label="Отображаемое имя">
+        <StyledInput
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Например: Даниил Елисеев"
+          onKeyDown={e => { if (e.key === "Enter") save(); }}
+        />
+      </Field>
+
+      <div style={{ fontSize: 11, color: "#6b6b67", marginBottom: 16, lineHeight: 1.5 }}>
+        Это имя видят другие участники команды на проектах, в которые ты приглашён.
+        Email и роль изменить нельзя — для этого обратись к администратору.
+      </div>
+
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Закрыть</button>
+        <button onClick={save} className={BTN.primary} style={{ flex: 2, opacity: saving ? 0.6 : 1 }} disabled={saving}>
+          {saving ? "Сохраняем..." : "Сохранить"}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ADMIN PAGE — административная панель (v1.5, видна только role=admin)
+// ════════════════════════════════════════════════════════════════════════════
+function AdminPage({ profile, client, showToast }) {
+  const [section, setSection] = useState("users");
+  const [users, setUsers] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [activity, setActivity] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [confirmText, setConfirmText] = useState("");
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      if (section === "users") {
+        setUsers(await adminListUsers(client));
+      } else if (section === "stats") {
+        setStats(await adminSystemStats(client));
+      } else if (section === "activity") {
+        setActivity(await adminFetchActivityLog(client, 100));
+      }
+    } catch (e) {
+      showToast("Ошибка загрузки: " + (e.message || ""), "error");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [section]);
+
+  const toggleApproval = async (u) => {
+    try {
+      await adminUpdateUser(client, u.id, { approved: !u.approved });
+      showToast(u.approved ? "Доступ отозван" : "Пользователь одобрен");
+      reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const toggleAdmin = async (u) => {
+    try {
+      await adminUpdateUser(client, u.id, { role: u.role === "admin" ? "user" : "admin" });
+      showToast(u.role === "admin" ? "Права admin сняты" : "Назначен admin");
+      reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const doDelete = async (u) => {
+    if (confirmText.toLowerCase() !== u.email.toLowerCase()) {
+      showToast("Введи email пользователя точно для подтверждения", "error");
+      return;
+    }
+    try {
+      await adminDeleteUser(client, u.id);
+      showToast(`Пользователь ${u.email} удалён со всеми данными`);
+      setConfirmDel(null);
+      setConfirmText("");
+      reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const filteredUsers = users.filter(u =>
+    !search || u.email.toLowerCase().includes(search.toLowerCase()) ||
+    (u.name || "").toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div>
+      {/* Подвкладки админки */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        {[
+          { id: "users",    label: "Пользователи", Icon: Users },
+          { id: "stats",    label: "Статистика",   Icon: Activity },
+          { id: "activity", label: "Журнал",       Icon: ScrollText },
+        ].map(s => (
+          <button
+            key={s.id}
+            onClick={() => setSection(s.id)}
+            style={{
+              padding: "6px 14px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 500,
+              background: section === s.id ? "rgba(212,175,55,0.15)" : "rgba(255,255,255,0.04)",
+              color: section === s.id ? "#d4af37" : "#a8a8a3",
+              border: `1px solid ${section === s.id ? "rgba(212,175,55,0.30)" : "rgba(255,255,255,0.06)"}`,
+              display: "inline-flex", alignItems: "center", gap: 6,
+              fontFamily: "inherit",
+            }}
+          >
+            <s.Icon size={13} strokeWidth={2.2} /> {s.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Раздел "Пользователи" */}
+      {section === "users" && (
+        <div>
+          <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ position: "relative", flex: 1, minWidth: 220, maxWidth: 360 }}>
+              <Search size={14} strokeWidth={2.2} style={{
+                position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+                color: "#6b6b67", pointerEvents: "none",
+              }} />
+              <StyledInput
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Поиск по email или имени..."
+                style={{ paddingLeft: 36 }}
+              />
+            </div>
+            {!loading && (
+              <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#a8a8a3" }}>
+                <span>Всего: <span style={{ color: "#fafaf7", fontWeight: 600 }}>{users.length}</span></span>
+                <span>Одобрено: <span style={{ color: "#6ee7a8", fontWeight: 600 }}>{users.filter(u => u.approved).length}</span></span>
+                <span>Ждут: <span style={{ color: "#f3d77b", fontWeight: 600 }}>{users.filter(u => !u.approved).length}</span></span>
+              </div>
+            )}
+          </div>
+
+          {loading ? (
+            <Empty text="Загружаем..." />
+          ) : filteredUsers.length === 0 ? (
+            <Empty text="Никто не подходит под фильтр" />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {filteredUsers.map(u => (
+                <div key={u.id} style={{
+                  display: "flex", alignItems: "center", gap: 12,
+                  padding: "10px 14px", borderRadius: 10,
+                  background: "#141414",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}>
+                  <UserAvatar name={u.name} email={u.email} size={32} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 13, color: "#fafaf7", fontWeight: 500 }}>
+                        {u.name || u.email.split("@")[0]}
+                      </span>
+                      {u.role === "admin" && (
+                        <span style={{
+                          fontSize: 9, padding: "1px 6px", borderRadius: 4, fontWeight: 600, letterSpacing: "0.06em",
+                          background: "rgba(212,175,55,0.12)", color: "#d4af37",
+                          border: "1px solid rgba(212,175,55,0.25)",
+                        }}>ADMIN</span>
+                      )}
+                      {!u.approved && (
+                        <span style={{
+                          fontSize: 9, padding: "1px 6px", borderRadius: 4, fontWeight: 600, letterSpacing: "0.06em",
+                          background: "rgba(243,215,123,0.10)", color: "#f3d77b",
+                          border: "1px solid rgba(243,215,123,0.25)",
+                        }}>ЖДЁТ</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b6b67", marginTop: 1 }}>{u.email}</div>
+                    <div style={{ fontSize: 10, color: "#6b6b67", marginTop: 2 }}>
+                      {u.projects_count} проектов · {u.transactions_count} транзакций
+                      {u.created_at && <> · с {new Date(u.created_at).toLocaleDateString("ru-RU")}</>}
+                    </div>
+                  </div>
+                  {u.id !== profile.id && (
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => toggleApproval(u)}
+                        title={u.approved ? "Отозвать доступ" : "Одобрить"}
+                        style={{
+                          padding: 6, borderRadius: 6, cursor: "pointer", border: "1px solid",
+                          background: u.approved ? "rgba(255,255,255,0.04)" : "rgba(110,231,168,0.10)",
+                          borderColor: u.approved ? "rgba(255,255,255,0.10)" : "rgba(110,231,168,0.30)",
+                          color: u.approved ? "#a8a8a3" : "#6ee7a8",
+                          display: "flex",
+                        }}
+                      >
+                        {u.approved ? <UserMinus size={13} strokeWidth={2.2} /> : <UserCheck size={13} strokeWidth={2.2} />}
+                      </button>
+                      <button
+                        onClick={() => toggleAdmin(u)}
+                        title={u.role === "admin" ? "Снять admin" : "Сделать admin"}
+                        style={{
+                          padding: 6, borderRadius: 6, cursor: "pointer", border: "1px solid",
+                          background: u.role === "admin" ? "rgba(212,175,55,0.10)" : "rgba(255,255,255,0.04)",
+                          borderColor: u.role === "admin" ? "rgba(212,175,55,0.30)" : "rgba(255,255,255,0.10)",
+                          color: u.role === "admin" ? "#d4af37" : "#a8a8a3",
+                          display: "flex",
+                        }}
+                      >
+                        <ShieldCheck size={13} strokeWidth={2.2} />
+                      </button>
+                      <button
+                        onClick={() => { setConfirmDel(u.id); setConfirmText(""); }}
+                        title="Удалить пользователя"
+                        style={{
+                          padding: 6, borderRadius: 6, cursor: "pointer", border: "1px solid",
+                          background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.10)",
+                          color: "#a8a8a3", display: "flex",
+                        }}
+                        onMouseOver={e => { e.currentTarget.style.color = "#f8a3a3"; e.currentTarget.style.borderColor = "rgba(248,163,163,0.30)"; }}
+                        onMouseOut={e => { e.currentTarget.style.color = "#a8a8a3"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
+                      >
+                        <Trash2 size={13} strokeWidth={2.2} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Раздел "Статистика" */}
+      {section === "stats" && (
+        <div>
+          {loading || !stats ? (
+            <Empty text="Загружаем..." />
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+              {[
+                { label: "Пользователей всего",  value: stats.users_total,        Icon: Users,        color: "#d4af37" },
+                { label: "Одобрено",             value: stats.users_approved,     Icon: UserCheck,    color: "#6ee7a8" },
+                { label: "Ожидают одобрения",    value: stats.users_pending,      Icon: Hourglass,    color: "#f3d77b" },
+                { label: "Проектов всего",       value: stats.projects_total,     Icon: FolderKanban, color: "#d4af37" },
+                { label: "Активных проектов",    value: stats.projects_active,    Icon: Activity,     color: "#93c5fd" },
+                { label: "В архиве",             value: stats.projects_archived,  Icon: Package,      color: "#6b6b67" },
+                { label: "Сумма портфеля",       value: stats.portfolio_total,    Icon: Briefcase,    color: "#d4af37", format: fmt },
+                { label: "Получено по портфелю", value: stats.portfolio_paid,     Icon: BadgeCheck,   color: "#6ee7a8", format: fmt },
+                { label: "Транзакций всего",     value: stats.transactions_total, Icon: Receipt,      color: "#a8a8a3" },
+                { label: "Доходов суммарно",     value: stats.income_total,       Icon: TrendingUp,   color: "#6ee7a8", format: fmt },
+                { label: "Расходов суммарно",    value: stats.expense_total,      Icon: TrendingDown, color: "#f8a3a3", format: fmt },
+              ].map((it, i) => (
+                <KpiCard key={i} label={it.label} value={Number(it.value || 0)} Icon={it.Icon} color={it.color} format={it.format} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Раздел "Журнал событий" */}
+      {section === "activity" && (
+        <div>
+          {loading ? (
+            <Empty text="Загружаем..." />
+          ) : activity.length === 0 ? (
+            <Empty text="Журнал пуст" />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {activity.map(a => {
+                const labels = {
+                  user_approved: { label: "Пользователь одобрен", color: "#6ee7a8", Icon: UserCheck },
+                  user_revoked:  { label: "Доступ отозван",       color: "#f3d77b", Icon: UserMinus },
+                  user_deleted:  { label: "Пользователь удалён",  color: "#f8a3a3", Icon: Trash2 },
+                  role_changed:  { label: "Изменена роль",        color: "#d4af37", Icon: ShieldCheck },
+                };
+                const cfg = labels[a.action] || { label: a.action, color: "#a8a8a3", Icon: Activity };
+                return (
+                  <div key={a.id} style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "8px 14px", borderRadius: 10,
+                    background: "#141414",
+                    border: "1px solid rgba(255,255,255,0.04)",
+                  }}>
+                    <span style={{
+                      width: 28, height: 28, borderRadius: 6,
+                      display: "inline-flex", alignItems: "center", justifyContent: "center",
+                      background: `${cfg.color}1a`, color: cfg.color, flexShrink: 0,
+                    }}>
+                      <cfg.Icon size={13} strokeWidth={2.2} />
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: "#fafaf7" }}>
+                        <span style={{ fontWeight: 500 }}>{cfg.label}:</span>{" "}
+                        <span style={{ color: "#a8a8a3" }}>{a.target_email || "—"}</span>
+                        {a.details?.from && a.details?.to && (
+                          <span style={{ color: "#6b6b67" }}> ({a.details.from} → {a.details.to})</span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#6b6b67", marginTop: 2 }}>
+                        {a.actor_email} · {new Date(a.created_at).toLocaleString("ru-RU")}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Модалка подтверждения удаления пользователя */}
+      {confirmDel && users.find(u => u.id === confirmDel) && (() => {
+        const u = users.find(x => x.id === confirmDel);
+        return (
+          <Modal
+            title="Удалить пользователя?"
+            onClose={() => { setConfirmDel(null); setConfirmText(""); }}
+            icon={<AlertTriangle size={16} />}
+            maxWidth={460}
+          >
+            <p style={{ fontSize: 13, color: "#a8a8a3", lineHeight: 1.55, marginTop: 0 }}>
+              Будут безвозвратно удалены: профиль <b style={{ color: "#fafaf7" }}>{u.email}</b>,
+              все его проекты ({u.projects_count}), все транзакции ({u.transactions_count}),
+              записи об участии в чужих командах. Восстановить будет невозможно.
+            </p>
+            <Field label={`Для подтверждения введи email пользователя`}>
+              <StyledInput
+                value={confirmText}
+                onChange={e => setConfirmText(e.target.value)}
+                placeholder={u.email}
+                autoFocus
+              />
+            </Field>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={() => { setConfirmDel(null); setConfirmText(""); }} className={BTN.ghost} style={{ flex: 1 }}>Отмена</button>
+              <button
+                onClick={() => doDelete(u)}
+                disabled={confirmText.toLowerCase() !== u.email.toLowerCase()}
+                style={{
+                  flex: 2, padding: "10px 16px", borderRadius: 8,
+                  background: confirmText.toLowerCase() === u.email.toLowerCase() ? "#f8a3a3" : "rgba(248,163,163,0.20)",
+                  border: "none", color: "#0a0a0a", cursor: "pointer",
+                  fontSize: 13, fontWeight: 600, fontFamily: "inherit",
+                  opacity: confirmText.toLowerCase() === u.email.toLowerCase() ? 1 : 0.5,
+                }}
+              >
+                Удалить навсегда
+              </button>
+            </div>
+          </Modal>
+        );
+      })()}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // BACKUP / MIGRATION PANEL
 // ════════════════════════════════════════════════════════════════════════════
 // Модальное окно с тремя инструментами:
@@ -3180,9 +4653,11 @@ export default function App() {
   const [tab, setTab]               = useState("dashboard");
   const [projects, setProjects]     = useState([]);
   const [txs, setTxs]               = useState([]);
+  const [clients, setClients]       = useState([]); // v1.5
 
   const [reportModal, setReportModal] = useState(false);
   const [backupModal, setBackupModal] = useState(false);
+  const [profileModal, setProfileModal] = useState(false); // v1.5
 
   const [toast, setToast] = useState({ visible: false, text: "", type: "success" });
   const toastTimer = useRef(null);
@@ -3216,12 +4691,14 @@ export default function App() {
             }
             setUser(session.user);
             setProfile(prof);
-            const [p, t] = await Promise.all([
+            const [p, t, cl] = await Promise.all([
               fetchProjects(supabase),
               fetchTransactions(supabase),
+              fetchClients(supabase).catch(() => []),
             ]);
             setProjects(p);
             setTxs(t);
+            setClients(cl);
             setPhase("ready");
           } catch (e) {
             console.warn("Сессия есть, но профиль не загружается:", e);
@@ -3251,6 +4728,7 @@ export default function App() {
         setProfile(null);
         setProjects([]);
         setTxs([]);
+        setClients([]);
         setPhase("auth");
       }
     });
@@ -3262,17 +4740,19 @@ export default function App() {
     setUser(u);
     setProfile(prof);
     try {
-      const [p, t] = await Promise.all([
+      const [p, t, cl] = await Promise.all([
         fetchProjects(supabase),
         fetchTransactions(supabase),
+        fetchClients(supabase).catch(() => []),
       ]);
       setProjects(p);
       setTxs(t);
+      setClients(cl);
       setPhase("ready");
-      showToast(`Добро пожаловать, ${prof.email.split("@")[0]}!`);
+      showToast(`Добро пожаловать, ${prof.name || prof.email.split("@")[0]}!`);
     } catch (e) {
       showToast("Ошибка загрузки данных: " + (e.message || ""), "error");
-      setPhase("ready");  // всё равно показываем интерфейс с пустыми данными
+      setPhase("ready");
     }
   };
 
@@ -3378,8 +4858,10 @@ export default function App() {
   const TABS = [
     { id: "dashboard", label: "Дашборд",   Icon: LayoutDashboard },
     { id: "projects",  label: "Проекты",   Icon: FolderKanban },
+    { id: "clients",   label: "Заказчики", Icon: BookUser },
     { id: "finance",   label: "Финансы",   Icon: Receipt },
     { id: "analytics", label: "Аналитика", Icon: BarChart3 },
+    ...(profile?.role === "admin" ? [{ id: "admin", label: "Admin", Icon: ShieldCheck }] : []),
   ];
 
   return (
@@ -3526,21 +5008,30 @@ export default function App() {
                 ADMIN
               </span>
             )}
-            <div style={{
-              fontSize: 11,
-              padding: "3px 9px",
-              borderRadius: 6,
-              fontWeight: 500,
-              background: "rgba(110,231,168,0.10)",
-              color: "#6ee7a8",
-              border: "1px solid rgba(110,231,168,0.20)",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-            }}>
+            <button
+              onClick={() => setProfileModal(true)}
+              title="Открыть мой профиль"
+              style={{
+                fontSize: 11,
+                padding: "3px 9px",
+                borderRadius: 6,
+                fontWeight: 500,
+                background: "rgba(110,231,168,0.10)",
+                color: "#6ee7a8",
+                border: "1px solid rgba(110,231,168,0.20)",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                transition: "all 0.18s",
+              }}
+              onMouseOver={e => { e.currentTarget.style.background = "rgba(110,231,168,0.18)"; }}
+              onMouseOut={e => { e.currentTarget.style.background = "rgba(110,231,168,0.10)"; }}
+            >
               <Cloud size={11} strokeWidth={2.2} />
-              {profile?.email}
-            </div>
+              {profile?.name || profile?.email}
+            </button>
           </div>
         </div>
       </div>
@@ -3614,10 +5105,12 @@ export default function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
-            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} />}
-            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} client={supabase} ownerId={profile.id} showToast={showToast} />}
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} clients={clients} profile={profile} />}
+            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} />}
+            {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
+            {tab === "admin" && profile?.role === "admin" && <AdminPage profile={profile} client={supabase} showToast={showToast} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -3632,6 +5125,13 @@ export default function App() {
         ownerId={profile.id}
         onImported={handleImported}
         onClose={()=>setBackupModal(false)}
+        showToast={showToast}
+      />}
+      {profileModal && <ProfileModal
+        profile={profile}
+        client={supabase}
+        onClose={() => setProfileModal(false)}
+        onProfileUpdated={(p) => setProfile(p)}
         showToast={showToast}
       />}
     </div>
