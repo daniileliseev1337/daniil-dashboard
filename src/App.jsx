@@ -1,5 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  LayoutDashboard, FolderKanban, Wallet, BarChart3,
+  Plus, Pencil, Trash2, X, Check, Calendar, AlertTriangle,
+  CheckCircle2, Clock, FileText, Package, LogOut,
+  FolderInput, Cloud, User, Users, Hourglass, Inbox,
+  ChevronRight, Eye, Sparkles, TrendingUp, TrendingDown,
+  ScissorsLineDashed, ArrowDownToLine, Search, Filter,
+  CircleAlert, Coffee, ShoppingCart, Pill, Music,
+  Briefcase, Receipt, BadgeCheck, Loader2, Mail,
+  Phone, Send, ExternalLink,
+} from "lucide-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, LineChart, Line,
@@ -64,16 +76,16 @@ const EXPENSE_CATS = [
 ];
 
 const STAGE_META = {
-  "Переговоры":       { color:"#64748b", progress:10  },
-  "КП выслано":       { color:"#60a5fa", progress:25  },
-  "Договор подписан": { color:"#a78bfa", progress:40  },
-  "В работе":         { color:"#fbbf24", progress:65  },
-  "Сдан заказчику":   { color:"#34d399", progress:85  },
-  "Оплачен":          { color:"#10b981", progress:100 },
-  "Архив":            { color:"#334155", progress:100 },
+  "Переговоры":       { color:"#6b6b67", progress:10  },
+  "КП выслано":       { color:"#93c5fd", progress:25  },
+  "Договор подписан": { color:"#d4af37", progress:40  },
+  "В работе":         { color:"#d4af37", progress:65  },
+  "Сдан заказчику":   { color:"#6ee7a8", progress:85  },
+  "Оплачен":          { color:"#6ee7a8", progress:100 },
+  "Архив":            { color:"#1c1c1a", progress:100 },
 };
 
-const PALETTE = ["#6366f1","#22d3ee","#f59e0b","#10b981","#ef4444","#8b5cf6","#ec4899","#f97316"];
+const PALETTE = ["#d4af37","#d4af37","#f59e0b","#6ee7a8","#f8a3a3","#8b5cf6","#ec4899","#f97316"];
 
 // Старые ключи window.storage — для попытки автоматического переноса данных
 // из предыдущей версии артефакта на этапе миграции
@@ -97,37 +109,54 @@ const todayStr = () => new Date().toISOString().slice(0,10);
 
 function projectDbToJs(row) {
   return {
-    id:           row.id,
-    name:         row.name || "",
-    client:       row.client || "",
-    executor:     row.executor || "",
-    type:         row.type || "ОВиК",
-    stage:        row.stage || "Переговоры",
-    startDate:    row.start_date || "",
-    deadline:     row.deadline || "",
-    contractSum:  row.contract_sum != null ? Number(row.contract_sum) : 0,
-    paidAmount:   row.paid_amount  != null ? Number(row.paid_amount)  : 0,
-    notes:        row.notes || "",
-    visibility:   row.visibility || "private",
-    ownerId:      row.owner_id,
+    id:             row.id,
+    name:           row.name || "",
+    client:         row.client || "",
+    executor:       row.executor || "",
+    type:           row.type || "ОВиК",
+    stage:          row.stage || "Переговоры",
+    startDate:      row.start_date || "",
+    deadline:       row.deadline || "",
+    contractSum:    row.contract_sum != null ? Number(row.contract_sum) : 0,
+    paidAmount:     row.paid_amount  != null ? Number(row.paid_amount)  : 0,
+    notes:          row.notes || "",
+    visibility:     row.visibility || "private",
+    ownerId:        row.owner_id,
+    // Новые поля v1.2 — ссылки на материалы и контакты заказчика
+    // links хранится в БД как JSONB-массив объектов вида [{title, url}, ...]
+    links:          Array.isArray(row.links) ? row.links : [],
+    clientPhone:    row.client_phone || "",
+    clientEmail:    row.client_email || "",
+    clientTelegram: row.client_telegram || "",
   };
 }
 
 function projectJsToDb(p, ownerId) {
   // Возвращаем только поля для записи в БД — без id (его генерирует БД при insert)
   return {
-    name:         p.name || "Без названия",
-    client:       p.client || null,
-    executor:     p.executor || null,
-    type:         p.type || null,
-    stage:        p.stage || "Переговоры",
-    start_date:   p.startDate || null,
-    deadline:     p.deadline || null,
-    contract_sum: parseFloat(p.contractSum) || 0,
-    paid_amount:  parseFloat(p.paidAmount)  || 0,
-    notes:        p.notes || null,
-    visibility:   p.visibility || "private",
-    owner_id:     ownerId,
+    name:             p.name || "Без названия",
+    client:           p.client || null,
+    executor:         p.executor || null,
+    type:             p.type || null,
+    stage:            p.stage || "Переговоры",
+    start_date:       p.startDate || null,
+    deadline:         p.deadline || null,
+    contract_sum:     parseFloat(p.contractSum) || 0,
+    paid_amount:      parseFloat(p.paidAmount)  || 0,
+    notes:            p.notes || null,
+    visibility:       p.visibility || "private",
+    owner_id:         ownerId,
+    // Новые поля v1.2. Фильтруем links — оставляем только записи с непустым URL,
+    // и нормализуем к строгой структуре {title, url}.
+    links: (Array.isArray(p.links) ? p.links : [])
+      .filter(l => l && l.url && l.url.trim())
+      .map(l => ({
+        title: (l.title || "").trim() || "Ссылка",
+        url:   l.url.trim(),
+      })),
+    client_phone:     p.clientPhone ? p.clientPhone.trim() : null,
+    client_email:     p.clientEmail ? p.clientEmail.trim() : null,
+    client_telegram:  p.clientTelegram ? p.clientTelegram.trim().replace(/^@/, "") : null,
   };
 }
 
@@ -302,172 +331,400 @@ function translateAuthError(err) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// STYLED INPUTS — те же что в v1, инлайн-стили для iOS Safari
+// STYLED INPUTS — обновлённые под новую цветовую палитру Linear-стиля
 // ════════════════════════════════════════════════════════════════════════════
 // Используем инлайн-стили, потому что Tailwind не перебивает -webkit-text-fill-color.
 // Это свойство — единственный надёжный способ сделать текст белым в iOS Safari.
 const BASE_INPUT = {
-  background:"#0f172a",
-  color:"white",
-  WebkitTextFillColor:"white",
-  border:"1px solid #1e293b",
-  borderRadius:8,
-  padding:"8px 12px",
-  fontSize:14,
-  width:"100%",
-  outline:"none",
-  boxSizing:"border-box",
-  colorScheme:"dark",
-  transition:"border-color 0.15s",
+  background: "#0a0b11",
+  color: "#f7f8f8",
+  WebkitTextFillColor: "#f7f8f8",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: 8,
+  padding: "10px 12px",
+  fontSize: 14,
+  width: "100%",
+  outline: "none",
+  boxSizing: "border-box",
+  colorScheme: "dark",
+  transition: "all 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+  fontFamily: "inherit",
 };
 
 function StyledInput(props) {
   const [focused, setFocused] = useState(false);
-  const { style={}, ...rest } = props;
+  const { style = {}, ...rest } = props;
   return (
-    <input {...rest}
-      style={{...BASE_INPUT, border:`1px solid ${focused?"#6366f1":"#1e293b"}`, ...style}}
-      onFocus={()=>setFocused(true)}
-      onBlur={()=>setFocused(false)}
+    <input
+      {...rest}
+      style={{
+        ...BASE_INPUT,
+        border: `1px solid ${focused ? "#d4af37" : "rgba(255,255,255,0.10)"}`,
+        boxShadow: focused ? "0 0 0 3px rgba(212,175,55,0.18)" : "none",
+        ...style,
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     />
   );
 }
 function StyledSelect(props) {
   const [focused, setFocused] = useState(false);
-  const { style={}, ...rest } = props;
+  const { style = {}, ...rest } = props;
   return (
-    <select {...rest}
-      style={{...BASE_INPUT, border:`1px solid ${focused?"#6366f1":"#1e293b"}`,
-        appearance:"none", cursor:"pointer", ...style}}
-      onFocus={()=>setFocused(true)}
-      onBlur={()=>setFocused(false)}
+    <select
+      {...rest}
+      style={{
+        ...BASE_INPUT,
+        border: `1px solid ${focused ? "#d4af37" : "rgba(255,255,255,0.10)"}`,
+        boxShadow: focused ? "0 0 0 3px rgba(212,175,55,0.18)" : "none",
+        appearance: "none",
+        cursor: "pointer",
+        ...style,
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     />
   );
 }
 function StyledTextarea(props) {
   const [focused, setFocused] = useState(false);
-  const { style={}, ...rest } = props;
+  const { style = {}, ...rest } = props;
   return (
-    <textarea {...rest}
-      style={{...BASE_INPUT, border:`1px solid ${focused?"#6366f1":"#1e293b"}`,
-        resize:"vertical", ...style}}
-      onFocus={()=>setFocused(true)}
-      onBlur={()=>setFocused(false)}
+    <textarea
+      {...rest}
+      style={{
+        ...BASE_INPUT,
+        border: `1px solid ${focused ? "#d4af37" : "rgba(255,255,255,0.10)"}`,
+        boxShadow: focused ? "0 0 0 3px rgba(212,175,55,0.18)" : "none",
+        resize: "vertical",
+        ...style,
+      }}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
     />
   );
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// PRIMITIVE UI
+// ANIMATED NUMBER — компонент плавно прокручивающихся цифр
+// ════════════════════════════════════════════════════════════════════════════
+// Принимает целевое значение и опциональную функцию форматирования.
+// При первом монтировании или при изменении значения плавно анимирует
+// от текущего отображаемого значения к новому за 700ms с easing-кривой
+// easeOutCubic (быстрое начало, плавное замедление к концу).
+//
+// Это создаёт эффект "живых данных" — когда страница загружается,
+// цифры не появляются мгновенно, а быстро прокручиваются от нуля
+// до своего реального значения, как табло на бирже. Эффект занимает
+// доли секунды, но создаёт ощущение пульсирующего инструмента.
+function AnimatedNumber({ value, format, duration = 700 }) {
+  const [display, setDisplay] = useState(0);
+  const prevValue = useRef(0);
+
+  useEffect(() => {
+    const startValue = prevValue.current;
+    const endValue = Number(value) || 0;
+    if (startValue === endValue) return;
+
+    const startTime = Date.now();
+    let rafId;
+    const tick = () => {
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+      // easeOutCubic — быстрое начало, плавное замедление к концу
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(startValue + (endValue - startValue) * eased);
+      if (t < 1) {
+        rafId = requestAnimationFrame(tick);
+      } else {
+        prevValue.current = endValue;
+      }
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [value, duration]);
+
+  return <>{format ? format(display) : Math.round(display)}</>;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PRIMITIVE UI — базовые строительные блоки в новой эстетике
 // ════════════════════════════════════════════════════════════════════════════
 const BTN = {
-  primary: "px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold transition-colors",
-  ghost:   "px-4 py-2 rounded-lg border border-slate-700 text-slate-400 hover:text-white hover:border-slate-500 text-sm transition-colors",
-  danger:  "px-2 py-1 rounded text-slate-500 hover:text-red-400 text-sm transition-colors",
-  edit:    "px-2 py-1 rounded text-slate-500 hover:text-indigo-400 text-sm transition-colors",
+  primary: "px-4 py-2 rounded-lg bg-[#d4af37] hover:bg-[#e8c860] text-[#0a0a0a] text-sm font-semibold transition-all duration-200 active:scale-[0.98]",
+  ghost: "px-4 py-2 rounded-lg border border-white/10 text-[#9b9ca4] hover:text-white hover:border-white/20 text-sm font-medium transition-all duration-200 active:scale-[0.98]",
+  danger: "px-2 py-1 rounded text-[#62646b] hover:text-[#f8a3a3] text-sm transition-colors duration-200",
+  edit: "px-2 py-1 rounded text-[#62646b] hover:text-[#d4af37] text-sm transition-colors duration-200",
 };
 
 function Label({ children }) {
-  return <p style={{fontSize:10,textTransform:"uppercase",letterSpacing:"0.12em",
-    color:"#64748b",marginBottom:4,fontWeight:700,margin:"0 0 4px 0"}}>{children}</p>;
-}
-function Field({ label, children, style={} }) {
-  return <div style={{marginBottom:12,...style}}><Label>{label}</Label>{children}</div>;
-}
-function Card({ children, style={} }) {
   return (
-    <div style={{background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:16,padding:16,...style}}>
+    <p style={{
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: "0.10em",
+      color: "#62646b",
+      marginBottom: 6,
+      fontWeight: 600,
+      margin: "0 0 6px 0",
+    }}>{children}</p>
+  );
+}
+
+function Field({ label, children, style = {} }) {
+  return <div style={{ marginBottom: 14, ...style }}><Label>{label}</Label>{children}</div>;
+}
+
+// Базовая карточка — фон чуть светлее основного, тонкая граница, скруглённые углы
+function Card({ children, style = {}, glass = false }) {
+  if (glass) {
+    return (
+      <div
+        className="glass-card"
+        style={{ borderRadius: 14, padding: 18, ...style }}
+      >
+        {children}
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      background: "#141414",
+      border: "1px solid rgba(255,255,255,0.06)",
+      borderRadius: 14,
+      padding: 18,
+      ...style,
+    }}>
       {children}
     </div>
   );
 }
-function SectionTitle({ children }) {
-  return <p style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",
-    letterSpacing:"0.12em",margin:"0 0 12px 0"}}>{children}</p>;
-}
-function Chip({ label, active, onClick }) {
-  return (
-    <button onClick={onClick} style={{
-      padding:"4px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",
-      background: active?"#4f46e5":"#1e2a3a",
-      color: active?"white":"#94a3b8",
-      border:"none",transition:"all 0.15s",
-    }}>{label}</button>
-  );
-}
 
-// ────────────────────────────────────────────────────────────────────────────
-// TOAST — уведомления о сохранении и ошибках
-// ────────────────────────────────────────────────────────────────────────────
-// Один компонент, который умеет показывать как успешные сообщения (зелёный),
-// так и ошибки (красный) — определяется параметром `type`.
-function Toast({ visible, text, type }) {
-  const colors = {
-    success: "#10b981",
-    error:   "#ef4444",
-    info:    "#6366f1",
-  };
+function SectionTitle({ children, icon }) {
   return (
-    <div style={{
-      position:"fixed",bottom:24,right:24,zIndex:200,
-      background: colors[type] || colors.success,
-      color:"white",borderRadius:12,
-      padding:"10px 18px",fontSize:13,fontWeight:600,
-      boxShadow:"0 8px 30px rgba(0,0,0,0.4)",
-      opacity: visible?1:0,
-      transform: visible?"translateY(0)":"translateY(12px)",
-      transition:"all 0.3s ease",
-      pointerEvents:"none",
-      maxWidth: "calc(100vw - 48px)",
-    }}>{text}</div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// MODAL
-// ────────────────────────────────────────────────────────────────────────────
-function Modal({ title, onClose, children, maxWidth=480 }) {
-  return (
-    <div style={{
-      position:"fixed",inset:0,zIndex:100,
-      display:"flex",alignItems:"center",justifyContent:"center",padding:16,
-      background:"rgba(2,8,23,0.88)",backdropFilter:"blur(4px)",
-    }}>
-      <div style={{
-        background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:20,
-        width:"100%",maxWidth,maxHeight:"90vh",overflowY:"auto",
-        boxShadow:"0 25px 60px rgba(0,0,0,0.5)",
-      }}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-          padding:"16px 24px",borderBottom:"1px solid #1e2a3a"}}>
-          <h3 style={{color:"white",fontWeight:700,fontSize:16,margin:0}}>{title}</h3>
-          <button onClick={onClose} style={{
-            background:"#1e2a3a",border:"none",color:"#94a3b8",
-            width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,
-            display:"flex",alignItems:"center",justifyContent:"center",
-          }}>×</button>
-        </div>
-        <div style={{padding:"20px 24px"}}>{children}</div>
-      </div>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+      {icon && <span style={{ color: "#62646b", display: "flex" }}>{icon}</span>}
+      <p style={{
+        fontSize: 11,
+        fontWeight: 600,
+        color: "#9b9ca4",
+        textTransform: "uppercase",
+        letterSpacing: "0.10em",
+        margin: 0,
+      }}>{children}</p>
     </div>
   );
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// KPI CARD
-// ────────────────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, sub, color="#6366f1", icon }) {
+// Чип-фильтр — нажимная пилюля с активным состоянием в акцентном цвете
+function Chip({ label, active, onClick }) {
   return (
-    <Card>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div style={{flex:1}}>
+    <button
+      onClick={onClick}
+      style={{
+        padding: "5px 12px",
+        borderRadius: 999,
+        fontSize: 12,
+        fontWeight: 500,
+        cursor: "pointer",
+        background: active ? "rgba(212,175,55,0.15)" : "rgba(255,255,255,0.04)",
+        color: active ? "#e8c860" : "#9b9ca4",
+        border: `1px solid ${active ? "rgba(212,175,55,0.30)" : "rgba(255,255,255,0.06)"}`,
+        transition: "all 0.18s cubic-bezier(0.16, 1, 0.3, 1)",
+        fontFamily: "inherit",
+      }}
+    >{label}</button>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// TOAST — уведомления с иконкой и пружинистой анимацией появления
+// ────────────────────────────────────────────────────────────────────────────
+function Toast({ visible, text, type = "success" }) {
+  const config = {
+    success: { color: "#6ee7a8", bg: "rgba(110,231,168,0.12)", border: "rgba(110,231,168,0.30)", Icon: CheckCircle2 },
+    error:   { color: "#f8a3a3", bg: "rgba(248,163,163,0.12)",  border: "rgba(248,163,163,0.30)",  Icon: CircleAlert },
+    info:    { color: "#d4af37", bg: "rgba(212,175,55,0.12)", border: "rgba(212,175,55,0.30)", Icon: Sparkles },
+  };
+  const { color, bg, border, Icon } = config[type] || config.success;
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={{ opacity: 0, y: 24, scale: 0.92 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 12, scale: 0.96 }}
+          transition={{ type: "spring", stiffness: 400, damping: 28 }}
+          style={{
+            position: "fixed", bottom: 24, right: 24, zIndex: 200,
+            background: "#1c1c1a",
+            border: `1px solid ${border}`,
+            color: "#f7f8f8",
+            borderRadius: 12,
+            padding: "10px 16px",
+            fontSize: 13,
+            fontWeight: 500,
+            boxShadow: "0 16px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04)",
+            display: "flex", alignItems: "center", gap: 10,
+            maxWidth: "calc(100vw - 48px)",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <span style={{ background: bg, padding: 4, borderRadius: 6, display: "flex", color }}>
+            <Icon size={14} strokeWidth={2.4} />
+          </span>
+          <span>{text}</span>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// MODAL — модальное окно с анимацией масштабирования и затемнением фона
+// ────────────────────────────────────────────────────────────────────────────
+function Modal({ title, onClose, children, maxWidth = 480, icon }) {
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+        style={{
+          position: "fixed", inset: 0, zIndex: 100,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 16,
+          background: "rgba(8,9,15,0.80)",
+          backdropFilter: "blur(8px)",
+        }}
+        onClick={onClose}
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.94, y: 12 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          exit={{ opacity: 0, scale: 0.96, y: 4 }}
+          transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            background: "#1c1c1a",
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 18,
+            width: "100%",
+            maxWidth,
+            maxHeight: "90vh",
+            overflowY: "auto",
+            boxShadow: "0 24px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)",
+          }}
+        >
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "16px 22px",
+            borderBottom: "1px solid rgba(255,255,255,0.06)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {icon && <span style={{ color: "#e8c860", display: "flex" }}>{icon}</span>}
+              <h3 style={{
+                color: "#f7f8f8", fontWeight: 600, fontSize: 15, margin: 0,
+                letterSpacing: "-0.01em",
+              }}>{title}</h3>
+            </div>
+            <button
+              onClick={onClose}
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                color: "#9b9ca4",
+                width: 30, height: 30,
+                borderRadius: 8,
+                cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                transition: "all 0.18s",
+              }}
+              onMouseOver={(e) => { e.currentTarget.style.color = "#f7f8f8"; e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+              onMouseOut={(e) => { e.currentTarget.style.color = "#9b9ca4"; e.currentTarget.style.background = "rgba(255,255,255,0.04)"; }}
+            >
+              <X size={16} strokeWidth={2.2} />
+            </button>
+          </div>
+          <div style={{ padding: "20px 22px" }}>{children}</div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// KPI CARD — главная карточка показателя с эффектом стекла и анимацией числа
+// ────────────────────────────────────────────────────────────────────────────
+// Это самые важные элементы дашборда — четыре главные цифры на верху страницы.
+// Поэтому они получают полную визуальную обработку: эффект стекла с лёгким
+// размытием, мягкое свечение акцентным цветом по краю, иконка в подсвеченном
+// квадрате слева, и плавная анимация числа при первом появлении.
+function KpiCard({ label, value, sub, color = "#d4af37", Icon, format, trend }) {
+  // Определяем формат отображения значения. Если передана функция format,
+  // используем её. Если значение строка (например, "65%") — оставляем как есть.
+  // Иначе округляем число до целого.
+  const isString = typeof value === "string";
+
+  return (
+    <div className="glass-card" style={{ borderRadius: 14, padding: 16, position: "relative", overflow: "hidden" }}>
+      {/* Тонкое цветное свечение в углу — акцент в цвет показателя */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: -30, right: -30,
+          width: 90, height: 90,
+          background: `radial-gradient(circle, ${color}22 0%, transparent 70%)`,
+          pointerEvents: "none",
+        }}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", position: "relative" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <Label>{label}</Label>
-          <div style={{fontSize:16,fontWeight:900,color,marginTop:4,lineHeight:1.2}}>{value}</div>
-          {sub&&<div style={{fontSize:11,color:"#475569",marginTop:4}}>{sub}</div>}
+          <div style={{
+            fontSize: 18, fontWeight: 700,
+            color: "#f7f8f8",
+            marginTop: 6,
+            lineHeight: 1.15,
+            letterSpacing: "-0.02em",
+            fontVariantNumeric: "tabular-nums",
+          }}>
+            {isString ? value : (
+              format ? <AnimatedNumber value={value} format={format}/> : <AnimatedNumber value={value}/>
+            )}
+          </div>
+          {sub && (
+            <div style={{
+              fontSize: 11, color: "#62646b", marginTop: 6,
+              display: "flex", alignItems: "center", gap: 4,
+            }}>
+              {trend === "up" && <TrendingUp size={11} style={{ color: "#6ee7a8" }}/>}
+              {trend === "down" && <TrendingDown size={11} style={{ color: "#f8a3a3" }}/>}
+              <span>{sub}</span>
+            </div>
+          )}
         </div>
-        <span style={{fontSize:22,opacity:0.7}}>{icon}</span>
+        {Icon && (
+          <div style={{
+            background: `${color}1a`,
+            border: `1px solid ${color}33`,
+            padding: 8,
+            borderRadius: 9,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color,
+            flexShrink: 0,
+          }}>
+            <Icon size={16} strokeWidth={2} />
+          </div>
+        )}
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -517,53 +774,118 @@ function AuthScreen({ onAuthenticated, onError }) {
 
   return (
     <div style={{
-      minHeight:"100vh",background:"#080e1a",color:"white",
-      fontFamily:"system-ui,-apple-system,sans-serif",
-      display:"flex",alignItems:"center",justifyContent:"center",padding:16,
+      minHeight: "100vh",
+      background: "#0a0a0a",
+      color: "#f7f8f8",
+      fontFamily: "'Geist Variable', system-ui, -apple-system, sans-serif",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 16,
+      position: "relative",
+      overflow: "hidden",
     }}>
-      <div style={{width:"100%",maxWidth:380}}>
-        {/* Шапка */}
-        <div style={{textAlign:"center",marginBottom:32}}>
-          <div style={{fontSize:28,fontWeight:900,letterSpacing:"-0.02em",marginBottom:6}}>
-            <span style={{color:"#6366f1"}}>Д</span>АНИИЛ
-          </div>
-          <div style={{fontSize:11,color:"#475569",textTransform:"uppercase",letterSpacing:"0.12em"}}>
+      {/* Декоративный градиентный фон с эффектом размытия в углах */}
+      <div aria-hidden style={{
+        position: "absolute",
+        top: -100, left: -100,
+        width: 380, height: 380,
+        background: "radial-gradient(circle, rgba(212,175,55,0.18) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+      <div aria-hidden style={{
+        position: "absolute",
+        bottom: -100, right: -100,
+        width: 380, height: 380,
+        background: "radial-gradient(circle, rgba(212,175,55,0.10) 0%, transparent 70%)",
+        pointerEvents: "none",
+      }} />
+
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        style={{ width: "100%", maxWidth: 380, position: "relative" }}
+      >
+        {/* Лого и подзаголовок */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{
+            fontSize: 32,
+            fontWeight: 700,
+            letterSpacing: "-0.03em",
+            marginBottom: 8,
+            background: "linear-gradient(135deg, #d4af37 0%, #e8c860 50%, #d4af37 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}>ДАНИИЛ</div>
+          <div style={{
+            fontSize: 11,
+            color: "#62646b",
+            textTransform: "uppercase",
+            letterSpacing: "0.14em",
+            fontWeight: 500,
+          }}>
             Рабочий центр · Проекты · Финансы
           </div>
         </div>
 
-        <Card>
+        <div className="glass-card" style={{ borderRadius: 16, padding: 24 }}>
           {mode === "check_email" ? (
-            <div style={{textAlign:"center",padding:"16px 0"}}>
-              <div style={{fontSize:42,marginBottom:14}}>📬</div>
-              <div style={{fontSize:16,fontWeight:700,color:"white",marginBottom:8}}>
+            <div style={{ textAlign: "center", padding: "12px 0" }}>
+              <div style={{
+                width: 56, height: 56,
+                borderRadius: 14,
+                background: "rgba(212,175,55,0.15)",
+                border: "1px solid rgba(212,175,55,0.30)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 16px",
+                color: "#e8c860",
+              }}>
+                <Mail size={28} strokeWidth={1.8} />
+              </div>
+              <div style={{
+                fontSize: 17,
+                fontWeight: 600,
+                color: "#f7f8f8",
+                marginBottom: 8,
+                letterSpacing: "-0.02em",
+              }}>
                 Проверь почту
               </div>
-              <p style={{fontSize:13,color:"#94a3b8",marginBottom:20,lineHeight:1.5}}>
-                На <span style={{color:"#818cf8"}}>{email}</span> отправлено письмо
+              <p style={{ fontSize: 13, color: "#9b9ca4", marginBottom: 20, lineHeight: 1.55 }}>
+                На <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> отправлено письмо
                 с ссылкой для подтверждения. Перейди по ней, потом возвращайся
                 и войди.
               </p>
               <button
-                onClick={()=>{ setMode("signin"); setError(null); }}
+                onClick={() => { setMode("signin"); setError(null); }}
                 className={BTN.primary}
-                style={{width:"100%"}}
+                style={{ width: "100%" }}
               >
                 Назад ко входу
               </button>
             </div>
           ) : (
             <>
-              <p style={{fontSize:14,fontWeight:600,color:"white",marginBottom:16,marginTop:0}}>
-                {mode === "signin" ? "Вход" : "Регистрация"}
-              </p>
+              <div style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: "#f7f8f8",
+                marginBottom: 18,
+                letterSpacing: "-0.01em",
+              }}>
+                {mode === "signin" ? "Вход в систему" : "Регистрация"}
+              </div>
 
               <Field label="Email">
                 <StyledInput
                   type="email"
                   autoComplete="email"
                   value={email}
-                  onChange={e=>setEmail(e.target.value)}
+                  onChange={e => setEmail(e.target.value)}
                   placeholder="you@example.com"
                 />
               </Field>
@@ -571,49 +893,86 @@ function AuthScreen({ onAuthenticated, onError }) {
               <Field label="Пароль">
                 <StyledInput
                   type="password"
-                  autoComplete={mode==="signin" ? "current-password" : "new-password"}
+                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
                   value={password}
-                  onChange={e=>setPassword(e.target.value)}
+                  onChange={e => setPassword(e.target.value)}
                   placeholder="Минимум 6 символов"
-                  onKeyDown={e=>{ if(e.key==="Enter") submit(); }}
+                  onKeyDown={e => { if (e.key === "Enter") submit(); }}
                 />
               </Field>
 
               {error && (
-                <div style={{
-                  background:"#ef444422",border:"1px solid #ef444466",
-                  color:"#fca5a5",padding:"8px 12px",borderRadius:8,
-                  fontSize:12,marginBottom:14,
-                }}>
-                  {error}
-                </div>
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  style={{
+                    background: "rgba(248,163,163,0.10)",
+                    border: "1px solid rgba(248,163,163,0.30)",
+                    color: "#f8a3a3",
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    marginBottom: 14,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <CircleAlert size={14} strokeWidth={2.2} />
+                  <span>{error}</span>
+                </motion.div>
               )}
 
               <button
                 onClick={submit}
                 disabled={loading}
                 className={BTN.primary}
-                style={{width:"100%",opacity:loading?0.6:1,marginBottom:12}}
+                style={{
+                  width: "100%",
+                  opacity: loading ? 0.7 : 1,
+                  marginBottom: 14,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "10px 16px",
+                }}
               >
-                {loading ? "Подключаемся..." : (mode==="signin"?"Войти":"Зарегистрироваться")}
+                {loading
+                  ? <><Loader2 size={14} className="animate-spin" strokeWidth={2.4} /> Подключаемся...</>
+                  : (mode === "signin" ? "Войти" : "Зарегистрироваться")}
               </button>
 
-              <div style={{textAlign:"center",fontSize:12,color:"#64748b"}}>
+              <div style={{ textAlign: "center", fontSize: 12, color: "#62646b" }}>
                 {mode === "signin" ? (
                   <>Нет аккаунта?{" "}
                     <button
-                      onClick={()=>{ setMode("signup"); setError(null); }}
-                      style={{background:"none",border:"none",color:"#818cf8",
-                        cursor:"pointer",fontSize:12,fontWeight:600,padding:0,
+                      onClick={() => { setMode("signup"); setError(null); }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#e8c860",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        padding: 0,
+                        fontFamily: "inherit",
                       }}
                     >Зарегистрироваться</button>
                   </>
                 ) : (
                   <>Уже есть аккаунт?{" "}
                     <button
-                      onClick={()=>{ setMode("signin"); setError(null); }}
-                      style={{background:"none",border:"none",color:"#818cf8",
-                        cursor:"pointer",fontSize:12,fontWeight:600,padding:0,
+                      onClick={() => { setMode("signin"); setError(null); }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#e8c860",
+                        cursor: "pointer",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        padding: 0,
+                        fontFamily: "inherit",
                       }}
                     >Войти</button>
                   </>
@@ -621,12 +980,22 @@ function AuthScreen({ onAuthenticated, onError }) {
               </div>
             </>
           )}
-        </Card>
+        </div>
 
-        <p style={{textAlign:"center",fontSize:10,color:"#334155",marginTop:24}}>
-          Данные хранятся в защищённой облачной БД Supabase (Frankfurt)
+        <p style={{
+          textAlign: "center",
+          fontSize: 10,
+          color: "#3a3c44",
+          marginTop: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+        }}>
+          <Cloud size={11} strokeWidth={2.2} />
+          Данные хранятся в защищённой БД Supabase (Frankfurt)
         </p>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -636,63 +1005,214 @@ function AuthScreen({ onAuthenticated, onError }) {
 // ════════════════════════════════════════════════════════════════════════════
 function ProjectForm({ initial, onSave, onClose, saving }) {
   const [f, setF] = useState(initial || {
-    name:"",client:"",executor:"",type:"ОВиК",stage:"Переговоры",
-    startDate:todayStr(),deadline:"",contractSum:"",paidAmount:"",notes:"",
-    visibility:"private",
+    name: "", client: "", executor: "", type: "ОВиК", stage: "Переговоры",
+    startDate: todayStr(), deadline: "", contractSum: "", paidAmount: "", notes: "",
+    visibility: "private",
+    // Новые поля v1.2 — список ссылок на материалы и контактные данные заказчика
+    links: [],
+    clientPhone: "", clientEmail: "", clientTelegram: "",
   });
-  const s = (k,v) => setF(p=>({...p,[k]:v}));
+  const s = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  // Управление списком ссылок: добавление пустой записи, удаление по индексу,
+  // редактирование отдельных полей конкретной записи
+  const addLink = () => {
+    setF(p => ({ ...p, links: [...(p.links || []), { title: "", url: "" }] }));
+  };
+  const removeLink = (idx) => {
+    setF(p => ({ ...p, links: (p.links || []).filter((_, i) => i !== idx) }));
+  };
+  const updateLink = (idx, key, value) => {
+    setF(p => ({
+      ...p,
+      links: (p.links || []).map((l, i) => i === idx ? { ...l, [key]: value } : l),
+    }));
+  };
 
   return (
     <div>
       <Field label="Название проекта">
-        <StyledInput value={f.name} onChange={e=>s("name",e.target.value)}
-          placeholder="Н-р: ОВиК Жилой дом пер. Строителей"/>
+        <StyledInput value={f.name} onChange={e => s("name", e.target.value)}
+          placeholder="Н-р: ОВиК Жилой дом пер. Строителей" />
       </Field>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div><Label>Заказчик / Клиент</Label>
-          <StyledInput value={f.client} onChange={e=>s("client",e.target.value)}/></div>
+          <StyledInput value={f.client} onChange={e => s("client", e.target.value)} /></div>
         <div><Label>Исполнитель</Label>
-          <StyledInput value={f.executor} onChange={e=>s("executor",e.target.value)}
-            placeholder="Н-р: Даниил, Субподряд"/></div>
+          <StyledInput value={f.executor} onChange={e => s("executor", e.target.value)}
+            placeholder="Н-р: Даниил, Субподряд" /></div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div>
           <Label>Тип работ</Label>
-          <StyledSelect value={f.type} onChange={e=>s("type",e.target.value)}>
-            {PROJECT_TYPES.map(t=><option key={t}>{t}</option>)}
+          <StyledSelect value={f.type} onChange={e => s("type", e.target.value)}>
+            {PROJECT_TYPES.map(t => <option key={t}>{t}</option>)}
           </StyledSelect>
         </div>
         <div>
           <Label>Стадия</Label>
-          <StyledSelect value={f.stage} onChange={e=>s("stage",e.target.value)}>
-            {PROJECT_STAGES.map(t=><option key={t}>{t}</option>)}
+          <StyledSelect value={f.stage} onChange={e => s("stage", e.target.value)}>
+            {PROJECT_STAGES.map(t => <option key={t}>{t}</option>)}
           </StyledSelect>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div><Label>Дата начала</Label>
-          <StyledInput type="date" value={f.startDate} onChange={e=>s("startDate",e.target.value)}/></div>
+          <StyledInput type="date" value={f.startDate} onChange={e => s("startDate", e.target.value)} /></div>
         <div><Label>Дедлайн</Label>
-          <StyledInput type="date" value={f.deadline} onChange={e=>s("deadline",e.target.value)}/></div>
+          <StyledInput type="date" value={f.deadline} onChange={e => s("deadline", e.target.value)} /></div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div><Label>Сумма договора (₽)</Label>
-          <StyledInput type="number" value={f.contractSum} onChange={e=>s("contractSum",e.target.value)} placeholder="0"/></div>
+          <StyledInput type="number" value={f.contractSum} onChange={e => s("contractSum", e.target.value)} placeholder="0" /></div>
         <div><Label>Оплачено факт (₽)</Label>
-          <StyledInput type="number" value={f.paidAmount} onChange={e=>s("paidAmount",e.target.value)} placeholder="0"/></div>
+          <StyledInput type="number" value={f.paidAmount} onChange={e => s("paidAmount", e.target.value)} placeholder="0" /></div>
       </div>
+
+      {/* ═══ НОВАЯ СЕКЦИЯ: Контакты заказчика ═══ */}
+      <div style={{
+        marginTop: 18, marginBottom: 14,
+        padding: "12px 14px",
+        background: "rgba(212,175,55,0.04)",
+        border: "1px solid rgba(212,175,55,0.12)",
+        borderRadius: 10,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: 11, fontWeight: 600, color: "#d4af37",
+          textTransform: "uppercase", letterSpacing: "0.10em",
+          marginBottom: 12,
+        }}>
+          <User size={12} strokeWidth={2.4} />
+          Контакты заказчика
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+          <div>
+            <Label>Телефон</Label>
+            <StyledInput
+              type="tel"
+              value={f.clientPhone}
+              onChange={e => s("clientPhone", e.target.value)}
+              placeholder="+7 999 123-45-67"
+            />
+          </div>
+          <div>
+            <Label>Email</Label>
+            <StyledInput
+              type="email"
+              value={f.clientEmail}
+              onChange={e => s("clientEmail", e.target.value)}
+              placeholder="client@example.com"
+            />
+          </div>
+        </div>
+        <div>
+          <Label>Telegram (без @)</Label>
+          <StyledInput
+            value={f.clientTelegram}
+            onChange={e => s("clientTelegram", e.target.value)}
+            placeholder="username"
+          />
+        </div>
+      </div>
+
+      {/* ═══ НОВАЯ СЕКЦИЯ: Ссылки на материалы ═══ */}
+      <div style={{
+        marginBottom: 14,
+        padding: "12px 14px",
+        background: "rgba(212,175,55,0.04)",
+        border: "1px solid rgba(212,175,55,0.12)",
+        borderRadius: 10,
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          marginBottom: 10,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 11, fontWeight: 600, color: "#d4af37",
+            textTransform: "uppercase", letterSpacing: "0.10em",
+          }}>
+            <FolderInput size={12} strokeWidth={2.4} />
+            Ссылки на материалы
+          </div>
+          <button
+            type="button"
+            onClick={addLink}
+            style={{
+              fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer", fontWeight: 500,
+              background: "rgba(212,175,55,0.12)",
+              border: "1px solid rgba(212,175,55,0.30)",
+              color: "#d4af37",
+              display: "flex", alignItems: "center", gap: 4,
+              fontFamily: "inherit",
+            }}
+          >
+            <Plus size={11} strokeWidth={2.4} /> Добавить
+          </button>
+        </div>
+        {(f.links || []).length === 0 ? (
+          <div style={{
+            fontSize: 11, color: "#6b6b67", textAlign: "center",
+            padding: "10px 0", fontStyle: "italic",
+          }}>
+            Yandex Disk, Google Drive, чертежи в облаке, переписки в Telegram...
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {(f.links || []).map((link, idx) => (
+              <div
+                key={idx}
+                style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr 28px", gap: 6, alignItems: "center" }}
+              >
+                <StyledInput
+                  value={link.title || ""}
+                  onChange={e => updateLink(idx, "title", e.target.value)}
+                  placeholder="Подпись"
+                  style={{ fontSize: 12, padding: "6px 10px" }}
+                />
+                <StyledInput
+                  value={link.url || ""}
+                  onChange={e => updateLink(idx, "url", e.target.value)}
+                  placeholder="https://..."
+                  style={{ fontSize: 12, padding: "6px 10px" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removeLink(idx)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    color: "#6b6b67",
+                    cursor: "pointer",
+                    padding: 4,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    transition: "color 0.18s",
+                  }}
+                  onMouseOver={e => e.currentTarget.style.color = "#f8a3a3"}
+                  onMouseOut={e => e.currentTarget.style.color = "#6b6b67"}
+                  title="Удалить ссылку"
+                >
+                  <Trash2 size={14} strokeWidth={2} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <Field label="Видимость">
-        <StyledSelect value={f.visibility} onChange={e=>s("visibility",e.target.value)}>
+        <StyledSelect value={f.visibility} onChange={e => s("visibility", e.target.value)}>
           <option value="private">Личный (только я)</option>
           <option value="team">Командный (видят все одобренные)</option>
         </StyledSelect>
       </Field>
       <Field label="Примечания">
-        <StyledTextarea rows={2} value={f.notes} onChange={e=>s("notes",e.target.value)}/>
+        <StyledTextarea rows={2} value={f.notes} onChange={e => s("notes", e.target.value)} />
       </Field>
-      <div style={{display:"flex",gap:10,marginTop:4}}>
-        <button onClick={onClose} className={BTN.ghost} style={{flex:1}} disabled={saving}>Отмена</button>
-        <button onClick={()=>onSave(f)} className={BTN.primary} style={{flex:2,opacity:saving?0.6:1}} disabled={saving}>
+      <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+        <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Отмена</button>
+        <button onClick={() => onSave(f)} className={BTN.primary} style={{ flex: 2, opacity: saving ? 0.6 : 1 }} disabled={saving}>
           {saving ? "Сохраняем..." : "Сохранить"}
         </button>
       </div>
@@ -747,134 +1267,238 @@ function TxForm({ initial, onSave, onClose, saving }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
 function Dashboard({ projects, txs }) {
-  const active = projects.filter(p=>!["Оплачен","Архив"].includes(p.stage));
-  const portfolio = projects.filter(p=>p.stage!=="Архив");
-  const totalContract = portfolio.reduce((s,p)=>s+(+p.contractSum||0),0);
-  const totalPaid     = portfolio.reduce((s,p)=>s+(+p.paidAmount||0),0);
+  const active = projects.filter(p => !["Оплачен", "Архив"].includes(p.stage));
+  const portfolio = projects.filter(p => p.stage !== "Архив");
+  const totalContract = portfolio.reduce((s, p) => s + (+p.contractSum || 0), 0);
+  const totalPaid = portfolio.reduce((s, p) => s + (+p.paidAmount || 0), 0);
 
   const now = new Date();
-  const mk = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
-  const mTxs    = txs.filter(t=>t.date.startsWith(mk));
-  const mIncome  = mTxs.filter(t=>t.type==="income").reduce((s,t)=>s+(+t.amount||0),0);
-  const mExpense = mTxs.filter(t=>t.type==="expense").reduce((s,t)=>s+(+t.amount||0),0);
+  const mk = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const mTxs = txs.filter(t => t.date.startsWith(mk));
+  const mIncome = mTxs.filter(t => t.type === "income").reduce((s, t) => s + (+t.amount || 0), 0);
+  const mExpense = mTxs.filter(t => t.type === "expense").reduce((s, t) => s + (+t.amount || 0), 0);
 
-  const stageData = PROJECT_STAGES.slice(0,-1)
-    .map(s=>({name:s,value:projects.filter(p=>p.stage===s).length,fill:STAGE_META[s].color}))
-    .filter(d=>d.value>0);
+  // Сравнение с прошлым месяцем для индикатора тренда
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const prevMk = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+  const prevTxs = txs.filter(t => t.date.startsWith(prevMk));
+  const prevIncome = prevTxs.filter(t => t.type === "income").reduce((s, t) => s + (+t.amount || 0), 0);
+  const prevExpense = prevTxs.filter(t => t.type === "expense").reduce((s, t) => s + (+t.amount || 0), 0);
+  const prevBalance = prevIncome - prevExpense;
+  const curBalance = mIncome - mExpense;
+  const balanceTrend = prevBalance === 0 ? null : (curBalance > prevBalance ? "up" : "down");
 
-  const months6 = Array.from({length:6},(_,i)=>{
-    const d = new Date(now.getFullYear(),now.getMonth()-5+i,1);
-    const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    const inc = txs.filter(t=>t.type==="income"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
-    const exp = txs.filter(t=>t.type==="expense"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
-    return {label:d.toLocaleDateString("ru-RU",{month:"short"}),inc,exp};
+  const stageData = PROJECT_STAGES.slice(0, -1)
+    .map(s => ({ name: s, value: projects.filter(p => p.stage === s).length, fill: STAGE_META[s].color }))
+    .filter(d => d.value > 0);
+
+  const months6 = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 5 + i, 1);
+    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const inc = txs.filter(t => t.type === "income" && t.date.startsWith(k)).reduce((s, t) => s + (+t.amount || 0), 0);
+    const exp = txs.filter(t => t.type === "expense" && t.date.startsWith(k)).reduce((s, t) => s + (+t.amount || 0), 0);
+    return { label: d.toLocaleDateString("ru-RU", { month: "short" }), inc, exp };
   });
 
-  const todayS  = todayStr();
-  const overdue  = active.filter(p=>p.deadline&&p.deadline<todayS&&p.stage!=="Сдан заказчику");
-  const upcoming = active.filter(p=>p.deadline&&p.deadline>=todayS)
-    .sort((a,b)=>a.deadline.localeCompare(b.deadline)).slice(0,4);
+  const todayS = todayStr();
+  const overdue = active.filter(p => p.deadline && p.deadline < todayS && p.stage !== "Сдан заказчику");
+  const upcoming = active.filter(p => p.deadline && p.deadline >= todayS)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline)).slice(0, 4);
 
-  const tt = {background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:8,fontSize:12,color:"white"};
+  // Тёмная стилизация для всплывающих подсказок графиков
+  const tt = {
+    background: "#1c1c1a",
+    border: "1px solid rgba(255,255,255,0.10)",
+    borderRadius: 10,
+    fontSize: 12,
+    color: "#f7f8f8",
+    boxShadow: "0 12px 28px rgba(0,0,0,0.5)",
+    padding: "8px 12px",
+  };
+
+  // Каскадная анимация появления — каждый элемент появляется со своей задержкой
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: { opacity: 1, transition: { staggerChildren: 0.06 } },
+  };
+  const itemVariants = {
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] } },
+  };
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
-        <KpiCard label="Активных проектов" value={active.length} icon="📁" color="#6366f1" sub={`всего: ${projects.length}`}/>
-        <KpiCard label="Портфель (договор)" value={fmt(totalContract)} icon="📋" color="#22d3ee"/>
-        <KpiCard label="Получено / осталось" value={fmt(totalPaid)} icon="✅" color="#10b981" sub={`осталось: ${fmt(totalContract-totalPaid)}`}/>
-        <KpiCard label="Баланс месяца" value={fmt(mIncome-mExpense)} icon="💰" color={mIncome>=mExpense?"#10b981":"#ef4444"} sub={`доходы ${fmt(mIncome)}`}/>
-      </div>
+    <motion.div
+      style={{ display: "flex", flexDirection: "column", gap: 16 }}
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
+      {/* Главные KPI — четыре стеклянные карточки */}
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        <KpiCard
+          label="Активных проектов"
+          value={active.length}
+          Icon={FolderKanban}
+          color="#d4af37"
+          sub={`всего: ${projects.length}`}
+        />
+        <KpiCard
+          label="Портфель"
+          value={totalContract}
+          Icon={Briefcase}
+          color="#d4af37"
+          format={fmt}
+        />
+        <KpiCard
+          label="Получено"
+          value={totalPaid}
+          Icon={BadgeCheck}
+          color="#6ee7a8"
+          format={fmt}
+          sub={`осталось: ${fmt(totalContract - totalPaid)}`}
+        />
+        <KpiCard
+          label="Баланс месяца"
+          value={curBalance}
+          Icon={Wallet}
+          color={curBalance >= 0 ? "#6ee7a8" : "#f8a3a3"}
+          format={fmt}
+          sub={`доходы ${fmt(mIncome)}`}
+          trend={balanceTrend}
+        />
+      </motion.div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      {/* Два графика рядом */}
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Card>
-          <SectionTitle>Проекты по стадиям</SectionTitle>
-          {stageData.length>0
-            ? <ResponsiveContainer width="100%" height={200}>
-                <PieChart>
-                  <Pie data={stageData} cx="50%" cy="50%" innerRadius={55} outerRadius={82} dataKey="value" paddingAngle={2}>
-                    {stageData.map((e,i)=><Cell key={i} fill={e.fill} stroke="transparent"/>)}
-                  </Pie>
-                  <Tooltip contentStyle={tt} formatter={(v,n)=>[`${v} проектов`,n]}/>
-                  <Legend iconType="circle" iconSize={8} formatter={v=><span style={{fontSize:10,color:"#94a3b8"}}>{v}</span>}/>
-                </PieChart>
-              </ResponsiveContainer>
-            : <Empty text="Добавь первый проект"/>}
+          <SectionTitle icon={<BarChart3 size={13} />}>Проекты по стадиям</SectionTitle>
+          {stageData.length > 0
+            ? <ResponsiveContainer width="100%" height={210}>
+              <PieChart>
+                <Pie data={stageData} cx="50%" cy="50%" innerRadius={56} outerRadius={84} dataKey="value" paddingAngle={3}>
+                  {stageData.map((e, i) => <Cell key={i} fill={e.fill} stroke="transparent" />)}
+                </Pie>
+                <Tooltip contentStyle={tt} formatter={(v, n) => [`${v} проектов`, n]} />
+                <Legend
+                  iconType="circle"
+                  iconSize={8}
+                  formatter={v => <span style={{ fontSize: 10, color: "#9b9ca4" }}>{v}</span>}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+            : <Empty text="Добавь первый проект" />}
         </Card>
         <Card>
-          <SectionTitle>Доходы и расходы — 6 мес.</SectionTitle>
-          {months6.some(m=>m.inc>0||m.exp>0)
-            ? <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={months6} barSize={12}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e2a3a" vertical={false}/>
-                  <XAxis dataKey="label" tick={{fill:"#64748b",fontSize:10}} axisLine={false} tickLine={false}/>
-                  <YAxis tick={{fill:"#64748b",fontSize:10}} axisLine={false} tickLine={false}
-                    tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v}/>
-                  <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n==="inc"?"Доходы":"Расходы"]}/>
-                  <Bar dataKey="inc" name="inc" fill="#6366f1" radius={[4,4,0,0]}/>
-                  <Bar dataKey="exp" name="exp" fill="#ef4444" radius={[4,4,0,0]}/>
-                </BarChart>
-              </ResponsiveContainer>
-            : <Empty text="Добавь первые финансовые записи"/>}
+          <SectionTitle icon={<TrendingUp size={13} />}>Доходы и расходы — 6 мес.</SectionTitle>
+          {months6.some(m => m.inc > 0 || m.exp > 0)
+            ? <ResponsiveContainer width="100%" height={210}>
+              <BarChart data={months6} barSize={14}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}к` : v} />
+                <Tooltip contentStyle={tt} formatter={(v, n) => [fmt(v), n === "inc" ? "Доходы" : "Расходы"]} />
+                <Bar dataKey="inc" name="inc" fill="#d4af37" radius={[5, 5, 0, 0]} />
+                <Bar dataKey="exp" name="exp" fill="#f8a3a3" radius={[5, 5, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            : <Empty text="Добавь первые финансовые записи" />}
         </Card>
-      </div>
+      </motion.div>
 
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+      {/* Дедлайны: просроченные и предстоящие */}
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <Card>
-          <SectionTitle>⚠️ Просроченные дедлайны</SectionTitle>
-          {overdue.length===0
-            ? <p style={{color:"#64748b",fontSize:13}}>Всё в срок 🎉</p>
-            : overdue.map(p=>(
-              <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #1e2a3a"}}>
-                <span style={{color:"#f87171",fontSize:13,fontWeight:600,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
-                <span style={{color:"#64748b",fontSize:11,flexShrink:0,marginLeft:8}}>{fmtD(p.deadline)}</span>
+          <SectionTitle icon={<AlertTriangle size={13} />}>Просроченные дедлайны</SectionTitle>
+          {overdue.length === 0
+            ? <p style={{ color: "#62646b", fontSize: 13, margin: 0 }}>Всё в срок</p>
+            : overdue.map(p => (
+              <div key={p.id} style={{
+                display: "flex", justifyContent: "space-between",
+                padding: "8px 0",
+                borderBottom: "1px solid rgba(255,255,255,0.04)",
+              }}>
+                <span style={{
+                  color: "#f8a3a3", fontSize: 13, fontWeight: 500, flex: 1,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>{p.name}</span>
+                <span style={{ color: "#62646b", fontSize: 11, flexShrink: 0, marginLeft: 8 }}>{fmtD(p.deadline)}</span>
               </div>
             ))}
         </Card>
         <Card>
-          <SectionTitle>📅 Ближайшие дедлайны</SectionTitle>
-          {upcoming.length===0
-            ? <p style={{color:"#64748b",fontSize:13}}>Нет запланированных дедлайнов</p>
-            : upcoming.map(p=>(
-              <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid #1e2a3a"}}>
-                <span style={{color:"#e2e8f0",fontSize:13,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
-                <span style={{color:"#818cf8",fontSize:11,flexShrink:0,marginLeft:8}}>{fmtD(p.deadline)}</span>
+          <SectionTitle icon={<Calendar size={13} />}>Ближайшие дедлайны</SectionTitle>
+          {upcoming.length === 0
+            ? <p style={{ color: "#62646b", fontSize: 13, margin: 0 }}>Нет запланированных дедлайнов</p>
+            : upcoming.map(p => (
+              <div key={p.id} style={{
+                display: "flex", justifyContent: "space-between",
+                padding: "8px 0",
+                borderBottom: "1px solid rgba(255,255,255,0.04)",
+              }}>
+                <span style={{
+                  color: "#f7f8f8", fontSize: 13, flex: 1,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>{p.name}</span>
+                <span style={{ color: "#e8c860", fontSize: 11, flexShrink: 0, marginLeft: 8 }}>{fmtD(p.deadline)}</span>
               </div>
             ))}
         </Card>
-      </div>
+      </motion.div>
 
-      <Card>
-        <SectionTitle>Финансы текущего месяца</SectionTitle>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
-          {[
-            {label:"Доходы",val:mIncome,color:"#818cf8"},
-            {label:"Расходы",val:mExpense,color:"#f87171"},
-            {label:"Баланс",val:mIncome-mExpense,color:mIncome>=mExpense?"#34d399":"#f87171"},
-          ].map(r=>(
-            <div key={r.label}>
-              <Label>{r.label}</Label>
-              <div style={{fontSize:18,fontWeight:900,color:r.color,marginTop:4}}>{fmt(r.val)}</div>
-            </div>
-          ))}
-        </div>
-        {mIncome>0&&(
-          <div style={{marginTop:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#64748b",marginBottom:6}}>
-              <span>Расходы от доходов</span>
-              <span>{Math.min(100,Math.round(mExpense/mIncome*100))}%</span>
-            </div>
-            <div style={{height:6,background:"#1e2a3a",borderRadius:3,overflow:"hidden"}}>
-              <div style={{height:"100%",background:"#6366f1",borderRadius:3,
-                width:`${Math.min(100,mExpense/mIncome*100)}%`,transition:"width 0.7s"}}/>
-            </div>
+      {/* Финансы текущего месяца с прогресс-баром */}
+      <motion.div variants={itemVariants}>
+        <Card>
+          <SectionTitle icon={<Wallet size={13} />}>Финансы текущего месяца</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            {[
+              { label: "Доходы", val: mIncome, color: "#e8c860" },
+              { label: "Расходы", val: mExpense, color: "#f8a3a3" },
+              { label: "Баланс", val: curBalance, color: curBalance >= 0 ? "#6ee7a8" : "#f8a3a3" },
+            ].map(r => (
+              <div key={r.label}>
+                <Label>{r.label}</Label>
+                <div style={{
+                  fontSize: 18, fontWeight: 700,
+                  color: r.color, marginTop: 6,
+                  letterSpacing: "-0.02em",
+                  fontVariantNumeric: "tabular-nums",
+                }}>{fmt(r.val)}</div>
+              </div>
+            ))}
           </div>
-        )}
-      </Card>
-    </div>
+          {mIncome > 0 && (
+            <div style={{ marginTop: 18 }}>
+              <div style={{
+                display: "flex", justifyContent: "space-between",
+                fontSize: 11, color: "#62646b", marginBottom: 6,
+              }}>
+                <span>Расходы от доходов</span>
+                <span>{Math.min(100, Math.round(mExpense / mIncome * 100))}%</span>
+              </div>
+              <div style={{
+                height: 6, background: "rgba(255,255,255,0.06)",
+                borderRadius: 3, overflow: "hidden",
+              }}>
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.min(100, mExpense / mIncome * 100)}%` }}
+                  transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
+                  style={{
+                    height: "100%",
+                    background: "linear-gradient(90deg, #d4af37, #e8c860)",
+                    borderRadius: 3,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+        </Card>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -940,13 +1564,13 @@ function Projects({ projects, setProjects, client, ownerId, showToast }) {
         {visible.length===0
           ? <Empty text={stageFilter==="Все"?"Нет проектов — нажми «Новый проект»":`Нет проектов со стадией «${stageFilter}»`}/>
           : visible.map(p=>{
-            const meta = STAGE_META[p.stage]||{color:"#6366f1",progress:0};
+            const meta = STAGE_META[p.stage]||{color:"#d4af37",progress:0};
             const isAwaitingPayment = p.stage==="Сдан заказчику";
             const isOverdue = p.deadline&&p.deadline<todayS&&!["Оплачен","Архив","Сдан заказчику"].includes(p.stage);
             const paid = +p.paidAmount||0;
             const contract = +p.contractSum||0;
             return (
-              <div key={p.id} style={{background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:16,padding:16}}>
+              <div key={p.id} style={{background:"#141414",border:"1px solid #141414",borderRadius:16,padding:16}}>
                 <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,marginBottom:6}}>
@@ -954,37 +1578,179 @@ function Projects({ projects, setProjects, client, ownerId, showToast }) {
                       <span style={{fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:600,
                         background:meta.color+"22",color:meta.color}}>{p.stage}</span>
                       {p.visibility==="team" && <span style={{fontSize:10,padding:"1px 6px",borderRadius:10,
-                        background:"#22d3ee22",color:"#22d3ee",fontWeight:600}}>👥 команда</span>}
-                      {isAwaitingPayment&&<span style={{fontSize:11,color:"#fbbf24",fontWeight:600}}>⏳ Ожидает оплаты</span>}
-                      {isOverdue&&<span style={{fontSize:11,color:"#f87171",fontWeight:600}}>⚠ Просрочен</span>}
+                        background:"#d4af3722",color:"#d4af37",fontWeight:600}}>👥 команда</span>}
+                      {isAwaitingPayment&&<span style={{fontSize:11,color:"#d4af37",fontWeight:600}}>⏳ Ожидает оплаты</span>}
+                      {isOverdue&&<span style={{fontSize:11,color:"#f8a3a3",fontWeight:600}}>⚠ Просрочен</span>}
                     </div>
-                    <div style={{fontSize:13,color:"#94a3b8",marginBottom:10,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"2px 0"}}>
+                    <div style={{fontSize:13,color:"#a8a8a3",marginBottom:10,display:"flex",flexWrap:"wrap",alignItems:"center",gap:"2px 0"}}>
                       {p.client&&<span>{p.client}</span>}
-                      {p.client&&p.type&&<span style={{margin:"0 6px",color:"#334155"}}>·</span>}
-                      <span style={{color:"#818cf8",fontWeight:600}}>{p.type}</span>
-                      {p.executor&&<><span style={{margin:"0 6px",color:"#334155"}}>·</span>
-                      <span style={{color:"#fbbf24"}}>👤 {p.executor}</span></>}
+                      {p.client&&p.type&&<span style={{margin:"0 6px",color:"#1c1c1a"}}>·</span>}
+                      <span style={{color:"#e8c860",fontWeight:600}}>{p.type}</span>
+                      {p.executor&&<><span style={{margin:"0 6px",color:"#1c1c1a"}}>·</span>
+                      <span style={{color:"#d4af37"}}>👤 {p.executor}</span></>}
                     </div>
-                    <div style={{height:4,background:"#1e2a3a",borderRadius:2,overflow:"hidden",marginBottom:10}}>
+                    <div style={{height:4,background:"#141414",borderRadius:2,overflow:"hidden",marginBottom:10}}>
                       <div style={{height:"100%",borderRadius:2,background:meta.color,
                         width:`${meta.progress}%`,transition:"width 0.5s"}}/>
                     </div>
                     <div style={{display:"flex",flexWrap:"wrap",gap:"4px 20px",fontSize:12}}>
-                      {contract>0&&<span style={{color:"#94a3b8"}}>Договор: <span style={{color:"#e2e8f0",fontWeight:600}}>{fmt(contract)}</span></span>}
-                      {paid>0&&<span style={{color:"#94a3b8"}}>Оплачено: <span style={{color:"#34d399",fontWeight:600}}>{fmt(paid)}</span></span>}
-                      {contract>0&&paid>0&&<span style={{color:"#94a3b8"}}>Остаток: <span style={{color:"#fbbf24",fontWeight:600}}>{fmt(contract-paid)}</span></span>}
-                      {p.deadline&&<span style={{color:"#94a3b8"}}>Дедлайн: <span style={{color:isOverdue?"#f87171":"#e2e8f0",fontWeight:isOverdue?600:400}}>{fmtD(p.deadline)}</span></span>}
+                      {contract>0&&<span style={{color:"#a8a8a3"}}>Договор: <span style={{color:"#fafaf7",fontWeight:600}}>{fmt(contract)}</span></span>}
+                      {paid>0&&<span style={{color:"#a8a8a3"}}>Оплачено: <span style={{color:"#6ee7a8",fontWeight:600}}>{fmt(paid)}</span></span>}
+                      {contract>0&&paid>0&&<span style={{color:"#a8a8a3"}}>Остаток: <span style={{color:"#d4af37",fontWeight:600}}>{fmt(contract-paid)}</span></span>}
+                      {p.deadline&&<span style={{color:"#a8a8a3"}}>Дедлайн: <span style={{color:isOverdue?"#f8a3a3":"#fafaf7",fontWeight:isOverdue?600:400}}>{fmtD(p.deadline)}</span></span>}
                     </div>
                     {contract>0&&paid>0&&(
                       <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
-                        <div style={{flex:1,height:3,background:"#1e2a3a",borderRadius:2,overflow:"hidden"}}>
-                          <div style={{height:"100%",background:"#10b981",borderRadius:2,
+                        <div style={{flex:1,height:3,background:"#141414",borderRadius:2,overflow:"hidden"}}>
+                          <div style={{height:"100%",background:"#6ee7a8",borderRadius:2,
                             width:`${Math.min(100,paid/contract*100)}%`}}/>
                         </div>
-                        <span style={{fontSize:10,color:"#64748b"}}>{Math.round(paid/contract*100)}%</span>
+                        <span style={{fontSize:10,color:"#6b6b67"}}>{Math.round(paid/contract*100)}%</span>
                       </div>
                     )}
-                    {p.notes&&<p style={{margin:"8px 0 0",fontSize:11,color:"#64748b",fontStyle:"italic"}}>{p.notes}</p>}
+                    {/* ═══ КОНТАКТЫ ЗАКАЗЧИКА ═══
+                        Показываются как маленькие кликабельные иконки. Каждая
+                        открывает соответствующее приложение через спец-протокол:
+                        tel: для звонка, mailto: для письма, t.me для Telegram. */}
+                    {(p.clientPhone || p.clientEmail || p.clientTelegram) && (
+                      <div style={{
+                        display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10,
+                      }}>
+                        {p.clientPhone && (
+                          <a
+                            href={`tel:${p.clientPhone.replace(/\s+/g, "")}`}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "4px 10px", borderRadius: 6,
+                              background: "rgba(212,175,55,0.06)",
+                              border: "1px solid rgba(212,175,55,0.20)",
+                              color: "#d4af37",
+                              fontSize: 11, fontWeight: 500,
+                              textDecoration: "none",
+                              transition: "all 0.18s",
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            onMouseOver={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.12)";
+                              e.currentTarget.style.color = "#e8c860";
+                            }}
+                            onMouseOut={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.06)";
+                              e.currentTarget.style.color = "#d4af37";
+                            }}
+                            title={`Позвонить ${p.clientPhone}`}
+                          >
+                            <Phone size={11} strokeWidth={2.2} />
+                            {p.clientPhone}
+                          </a>
+                        )}
+                        {p.clientEmail && (
+                          <a
+                            href={`mailto:${p.clientEmail}`}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "4px 10px", borderRadius: 6,
+                              background: "rgba(212,175,55,0.06)",
+                              border: "1px solid rgba(212,175,55,0.20)",
+                              color: "#d4af37",
+                              fontSize: 11, fontWeight: 500,
+                              textDecoration: "none",
+                              transition: "all 0.18s",
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            onMouseOver={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.12)";
+                              e.currentTarget.style.color = "#e8c860";
+                            }}
+                            onMouseOut={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.06)";
+                              e.currentTarget.style.color = "#d4af37";
+                            }}
+                            title={`Написать на ${p.clientEmail}`}
+                          >
+                            <Mail size={11} strokeWidth={2.2} />
+                            {p.clientEmail}
+                          </a>
+                        )}
+                        {p.clientTelegram && (
+                          <a
+                            href={`https://t.me/${p.clientTelegram.replace(/^@/, "")}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "4px 10px", borderRadius: 6,
+                              background: "rgba(212,175,55,0.06)",
+                              border: "1px solid rgba(212,175,55,0.20)",
+                              color: "#d4af37",
+                              fontSize: 11, fontWeight: 500,
+                              textDecoration: "none",
+                              transition: "all 0.18s",
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            onMouseOver={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.12)";
+                              e.currentTarget.style.color = "#e8c860";
+                            }}
+                            onMouseOut={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.06)";
+                              e.currentTarget.style.color = "#d4af37";
+                            }}
+                            title={`Открыть Telegram @${p.clientTelegram}`}
+                          >
+                            <Send size={11} strokeWidth={2.2} />
+                            @{p.clientTelegram.replace(/^@/, "")}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {/* ═══ ССЫЛКИ НА МАТЕРИАЛЫ ═══
+                        Кликабельные кнопки с подписями, открываются в новой вкладке.
+                        Иконка облака маркирует их как внешние ссылки. */}
+                    {Array.isArray(p.links) && p.links.length > 0 && (
+                      <div style={{
+                        display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8,
+                      }}>
+                        {p.links.map((link, idx) => (
+                          <a
+                            key={idx}
+                            href={link.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: 5,
+                              padding: "4px 10px", borderRadius: 6,
+                              background: "rgba(255,255,255,0.04)",
+                              border: "1px solid rgba(255,255,255,0.10)",
+                              color: "#a8a8a3",
+                              fontSize: 11, fontWeight: 500,
+                              textDecoration: "none",
+                              transition: "all 0.18s",
+                              maxWidth: 240,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                            onClick={e => e.stopPropagation()}
+                            onMouseOver={e => {
+                              e.currentTarget.style.background = "rgba(212,175,55,0.10)";
+                              e.currentTarget.style.borderColor = "rgba(212,175,55,0.30)";
+                              e.currentTarget.style.color = "#d4af37";
+                            }}
+                            onMouseOut={e => {
+                              e.currentTarget.style.background = "rgba(255,255,255,0.04)";
+                              e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)";
+                              e.currentTarget.style.color = "#a8a8a3";
+                            }}
+                            title={link.url}
+                          >
+                            <ExternalLink size={11} strokeWidth={2.2} />
+                            {link.title || "Ссылка"}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                    {p.notes&&<p style={{margin:"10px 0 0",fontSize:11,color:"#6b6b67",fontStyle:"italic"}}>{p.notes}</p>}
                   </div>
                   <div style={{display:"flex",gap:4,flexShrink:0}}>
                     <button onClick={()=>setModal(p)} className={BTN.edit}>✏️</button>
@@ -992,8 +1758,8 @@ function Projects({ projects, setProjects, client, ownerId, showToast }) {
                       style={{
                         padding:"4px 8px",borderRadius:6,border:"none",cursor:"pointer",
                         fontSize:12,fontWeight:700,transition:"all .15s",
-                        background:confirmDel===p.id?"#ef444433":"transparent",
-                        color:confirmDel===p.id?"#ef4444":"#64748b",
+                        background:confirmDel===p.id?"#f8a3a333":"transparent",
+                        color:confirmDel===p.id?"#f8a3a3":"#6b6b67",
                       }}
                       onBlur={()=>setConfirmDel(null)}
                       title={confirmDel===p.id?"Нажми ещё раз чтобы удалить":"Удалить проект"}
@@ -1445,23 +2211,23 @@ function CsvImportModal({ onClose, onImport }) {
       background:"rgba(2,8,23,0.92)",backdropFilter:"blur(6px)",
     }}>
       <div style={{
-        background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:20,
+        background:"#141414",border:"1px solid #141414",borderRadius:20,
         width:"100%",maxWidth: step==="preview" ? 740 : 460,
         maxHeight:"90vh",overflowY:"auto",
         boxShadow:"0 25px 60px rgba(0,0,0,.6)",
       }}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-          padding:"16px 24px",borderBottom:"1px solid #1e2a3a",position:"sticky",top:0,
-          background:"#0f1623",zIndex:1}}>
+          padding:"16px 24px",borderBottom:"1px solid #141414",position:"sticky",top:0,
+          background:"#141414",zIndex:1}}>
           <div>
             <h3 style={{color:"white",fontWeight:700,fontSize:16,margin:0}}>📂 Импорт из банка</h3>
-            {step==="preview" && <p style={{fontSize:11,color:"#64748b",marginTop:2}}>
-              Банк: <span style={{color:"#818cf8",fontWeight:600}}>{BANK_LABELS[bank]||bank}</span>
+            {step==="preview" && <p style={{fontSize:11,color:"#6b6b67",marginTop:2}}>
+              Банк: <span style={{color:"#e8c860",fontWeight:600}}>{BANK_LABELS[bank]||bank}</span>
               {" · "}{parsed.length} операций найдено
             </p>}
           </div>
           <button onClick={onClose} style={{
-            background:"#1e2a3a",border:"none",color:"#94a3b8",
+            background:"#141414",border:"none",color:"#a8a8a3",
             width:32,height:32,borderRadius:8,cursor:"pointer",fontSize:18,
             display:"flex",alignItems:"center",justifyContent:"center",
           }}>×</button>
@@ -1470,7 +2236,7 @@ function CsvImportModal({ onClose, onImport }) {
         <div style={{padding:"20px 24px"}}>
           {step==="upload" && (
             <div>
-              <p style={{fontSize:13,color:"#94a3b8",marginBottom:16,lineHeight:1.5}}>
+              <p style={{fontSize:13,color:"#a8a8a3",marginBottom:16,lineHeight:1.5}}>
                 Загрузи файл выписки из банка. Поддерживаются CSV (Тинькофф, Сбер, Альфа, Яндекс)
                 и PDF (Яндекс Банк). Все операции пройдут автокатегоризацию,
                 и ты сможешь проверить и подправить категории перед импортом.
@@ -1478,8 +2244,8 @@ function CsvImportModal({ onClose, onImport }) {
               <input ref={fileRef} type="file" accept=".csv,.pdf" onChange={handleFile} style={{display:"none"}}/>
               <button onClick={()=>fileRef.current?.click()} disabled={pdfLoading} style={{
                 width:"100%",padding:"32px 16px",borderRadius:14,
-                background:"#1e2a3a",border:"2px dashed #334155",
-                color:pdfLoading?"#64748b":"#e2e8f0",fontSize:14,fontWeight:600,
+                background:"#141414",border:"2px dashed #1c1c1a",
+                color:pdfLoading?"#6b6b67":"#fafaf7",fontSize:14,fontWeight:600,
                 cursor:pdfLoading?"wait":"pointer",
               }}>
                 {pdfLoading ? "Парсим PDF..." : "📁 Выбрать файл (.csv или .pdf)"}
@@ -1490,40 +2256,40 @@ function CsvImportModal({ onClose, onImport }) {
           {step==="preview" && <>
             <div style={{
               display:"flex",gap:12,marginBottom:16,padding:"12px 16px",
-              background:"#1e2a3a",borderRadius:12,flexWrap:"wrap"
+              background:"#141414",borderRadius:12,flexWrap:"wrap"
             }}>
               {[
-                {label:"Найдено",  val:parsed.length,             color:"#818cf8"},
-                {label:"Импортируем", val:toImport.length,        color:"#10b981"},
+                {label:"Найдено",  val:parsed.length,             color:"#e8c860"},
+                {label:"Импортируем", val:toImport.length,        color:"#6ee7a8"},
                 {label:"Пропускаем", val:edited.filter(r=>r.skip).length, color:"#f59e0b"},
-                {label:"Расходов", val:toImport.filter(r=>r.type==="expense").length, color:"#ef4444"},
-                {label:"Доходов",  val:toImport.filter(r=>r.type==="income").length,  color:"#22d3ee"},
+                {label:"Расходов", val:toImport.filter(r=>r.type==="expense").length, color:"#f8a3a3"},
+                {label:"Доходов",  val:toImport.filter(r=>r.type==="income").length,  color:"#d4af37"},
               ].map(s=>(
                 <div key={s.label} style={{textAlign:"center",minWidth:70}}>
-                  <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase",letterSpacing:".08em"}}>{s.label}</div>
+                  <div style={{fontSize:10,color:"#6b6b67",fontWeight:700,textTransform:"uppercase",letterSpacing:".08em"}}>{s.label}</div>
                   <div style={{fontSize:18,fontWeight:900,color:s.color,marginTop:2}}>{s.val}</div>
                 </div>
               ))}
             </div>
 
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontSize:11,color:"#64748b",fontWeight:600}}>
+              <div style={{fontSize:11,color:"#6b6b67",fontWeight:600}}>
                 Нажми на название чтобы отредактировать. ✂ — автоочистка длинного текста.
               </div>
               <button
                 onClick={()=>setEdited(e=>e.map(r=>({...r,description:cleanDesc(r.description)})))}
                 style={{
-                  background:"#1e2a3a",border:"1px solid #2d3f55",borderRadius:8,
-                  color:"#94a3b8",fontSize:11,fontWeight:700,cursor:"pointer",
+                  background:"#141414",border:"1px solid #2d3f55",borderRadius:8,
+                  color:"#a8a8a3",fontSize:11,fontWeight:700,cursor:"pointer",
                   padding:"5px 12px",flexShrink:0,whiteSpace:"nowrap",
                 }}>✂ Очистить все названия</button>
             </div>
 
-            <div style={{border:"1px solid #1e2a3a",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{border:"1px solid #141414",borderRadius:12,overflow:"hidden",marginBottom:16}}>
               <div style={{
                 display:"grid",gridTemplateColumns:"90px 1fr 130px 90px 32px",gap:8,
                 padding:"8px 12px",background:"#131d2e",
-                fontSize:10,fontWeight:700,color:"#475569",textTransform:"uppercase",letterSpacing:".08em"
+                fontSize:10,fontWeight:700,color:"#404040",textTransform:"uppercase",letterSpacing:".08em"
               }}>
                 <span>Дата</span><span>Описание</span><span>Категория</span>
                 <span style={{textAlign:"right"}}>Сумма</span><span></span>
@@ -1532,30 +2298,30 @@ function CsvImportModal({ onClose, onImport }) {
                 {edited.map(row=>(
                   <div key={row.id} style={{
                     display:"grid",gridTemplateColumns:"90px 1fr 130px 90px 32px",gap:8,
-                    padding:"8px 12px",borderTop:"1px solid #1e2a3a",alignItems:"center",
+                    padding:"8px 12px",borderTop:"1px solid #141414",alignItems:"center",
                     opacity:row.skip?0.35:1,transition:"opacity .15s",
-                    background:row.skip?"transparent":(row.type==="income"?"#6366f108":"transparent"),
+                    background:row.skip?"transparent":(row.type==="income"?"#d4af3708":"transparent"),
                   }}>
-                    <span style={{fontSize:11,color:"#64748b",whiteSpace:"nowrap"}}>{fmtD(row.date)}</span>
+                    <span style={{fontSize:11,color:"#6b6b67",whiteSpace:"nowrap"}}>{fmtD(row.date)}</span>
                     <div style={{minWidth:0}}>
                       <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:3}}>
                         <input
                           value={row.description||""}
                           onChange={e=>changeDesc(row.id, e.target.value)}
                           style={{
-                            flex:1,background:"#0f172a",border:"1px solid #1e2a3a",
+                            flex:1,background:"#0a0a0a",border:"1px solid #141414",
                             borderRadius:6,padding:"3px 7px",fontSize:12,
                             color:"white",WebkitTextFillColor:"white",
                             outline:"none",minWidth:0,
                           }}
-                          onFocus={e=>e.target.style.borderColor="#6366f1"}
-                          onBlur={e=>e.target.style.borderColor="#1e2a3a"}
+                          onFocus={e=>e.target.style.borderColor="#d4af37"}
+                          onBlur={e=>e.target.style.borderColor="#141414"}
                         />
                         <button
                           onClick={()=>changeDesc(row.id, cleanDesc(row.description))}
                           style={{
-                            background:"#1e2a3a",border:"none",borderRadius:5,
-                            color:"#64748b",fontSize:11,cursor:"pointer",
+                            background:"#141414",border:"none",borderRadius:5,
+                            color:"#6b6b67",fontSize:11,cursor:"pointer",
                             padding:"3px 6px",flexShrink:0,fontWeight:700,
                           }}>✂</button>
                       </div>
@@ -1563,8 +2329,8 @@ function CsvImportModal({ onClose, onImport }) {
                         {["expense","income"].map(t=>(
                           <button key={t} onClick={()=>changeType(row.id,t)} style={{
                             padding:"1px 7px",borderRadius:6,border:"none",cursor:"pointer",fontSize:10,fontWeight:700,
-                            background: row.type===t ? (t==="income"?"#22d3ee22":"#ef444422") : "#1e2a3a",
-                            color: row.type===t ? (t==="income"?"#22d3ee":"#ef4444") : "#475569",
+                            background: row.type===t ? (t==="income"?"#d4af3722":"#f8a3a322") : "#141414",
+                            color: row.type===t ? (t==="income"?"#d4af37":"#f8a3a3") : "#404040",
                           }}>{t==="income"?"Доход":"Расход"}</button>
                         ))}
                       </div>
@@ -1573,7 +2339,7 @@ function CsvImportModal({ onClose, onImport }) {
                       value={row.category}
                       onChange={e=>changeCat(row.id,e.target.value)}
                       style={{
-                        background:"#131d2e",border:"1px solid #1e2a3a",borderRadius:6,
+                        background:"#131d2e",border:"1px solid #141414",borderRadius:6,
                         color:"white",WebkitTextFillColor:"white",fontSize:11,padding:"4px 6px",
                         width:"100%",colorScheme:"dark",
                       }}>
@@ -1581,13 +2347,13 @@ function CsvImportModal({ onClose, onImport }) {
                     </select>
                     <div style={{
                       textAlign:"right",fontSize:12,fontWeight:700,
-                      color:row.type==="income"?"#22d3ee":"#f87171",whiteSpace:"nowrap"
+                      color:row.type==="income"?"#d4af37":"#f8a3a3",whiteSpace:"nowrap"
                     }}>
                       {row.type==="income"?"+":"−"}{Math.round(row.amount).toLocaleString("ru-RU")}
                     </div>
                     <button onClick={()=>toggleSkip(row.id)} style={{
                       background:"none",border:"none",cursor:"pointer",
-                      color:row.skip?"#10b981":"#475569",fontSize:16,
+                      color:row.skip?"#6ee7a8":"#404040",fontSize:16,
                       display:"flex",alignItems:"center",justifyContent:"center",
                       transition:"color .15s",
                     }}>{row.skip?"↩":"×"}</button>
@@ -1598,11 +2364,11 @@ function CsvImportModal({ onClose, onImport }) {
 
             <div style={{display:"flex",gap:10}}>
               <button onClick={()=>setStep("upload")} style={{
-                flex:1,padding:"12px",borderRadius:12,background:"#1e2a3a",border:"none",
-                color:"#94a3b8",fontSize:14,fontWeight:600,cursor:"pointer",
+                flex:1,padding:"12px",borderRadius:12,background:"#141414",border:"none",
+                color:"#a8a8a3",fontSize:14,fontWeight:600,cursor:"pointer",
               }}>← Назад</button>
               <button onClick={doImport} disabled={importing||toImport.length===0} style={{
-                flex:2,padding:"12px",borderRadius:12,background:"#4f46e5",border:"none",
+                flex:2,padding:"12px",borderRadius:12,background:"#d4af37",border:"none",
                 color:"white",fontSize:14,fontWeight:700,cursor:"pointer",
                 opacity:toImport.length===0?0.5:1,
               }}>
@@ -1617,11 +2383,11 @@ function CsvImportModal({ onClose, onImport }) {
               <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>
                 Импорт завершён!
               </div>
-              <div style={{fontSize:13,color:"#64748b",marginBottom:24}}>
+              <div style={{fontSize:13,color:"#6b6b67",marginBottom:24}}>
                 {toImport.length} операций добавлены в финансы
               </div>
               <button onClick={onClose} style={{
-                padding:"12px 32px",borderRadius:12,background:"#4f46e5",border:"none",
+                padding:"12px 32px",borderRadius:12,background:"#d4af37",border:"none",
                 color:"white",fontSize:14,fontWeight:700,cursor:"pointer",
               }}>Отлично 👍</button>
             </div>
@@ -1698,7 +2464,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
     .map(c=>({name:c,value:filtered.filter(t=>t.type==="income"&&t.category===c).reduce((s,t)=>s+(+t.amount||0),0)}))
     .filter(d=>d.value>0);
 
-  const tt = {background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:8,fontSize:12,color:"white"};
+  const tt = {background:"#141414",border:"1px solid #141414",borderRadius:8,fontSize:12,color:"white"};
 
   return (
     <div>
@@ -1715,7 +2481,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
         </button>
         <button onClick={()=>setCsvModal(true)} style={{
           fontSize:12,padding:"7px 12px",borderRadius:8,cursor:"pointer",fontWeight:600,
-          background:"#10b98122",border:"1px solid #10b98144",color:"#10b981",flexShrink:0,
+          background:"#6ee7a822",border:"1px solid #6ee7a844",color:"#6ee7a8",flexShrink:0,
         }}>
           📂 Импорт CSV
         </button>
@@ -1723,9 +2489,9 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
         {[
-          {label:"Доходы",val:inc,color:"#818cf8"},
-          {label:"Расходы",val:exp,color:"#f87171"},
-          {label:"Баланс",val:inc-exp,color:inc>=exp?"#34d399":"#f87171"},
+          {label:"Доходы",val:inc,color:"#e8c860"},
+          {label:"Расходы",val:exp,color:"#f8a3a3"},
+          {label:"Баланс",val:inc-exp,color:inc>=exp?"#6ee7a8":"#f8a3a3"},
         ].map(r=>(
           <Card key={r.label} style={{textAlign:"center"}}>
             <Label>{r.label}</Label>
@@ -1745,7 +2511,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
                     {incByCat.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
                   <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n]}/>
-                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#94a3b8"}}>{v}</span>}/>
+                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
             </Card>
@@ -1759,7 +2525,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
                     {expByCat.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
                   <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n]}/>
-                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#94a3b8"}}>{v}</span>}/>
+                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
             </Card>
@@ -1772,20 +2538,20 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
           ? <Empty text="Нет записей за выбранный период"/>
           : filtered.map(t=>(
             <div key={t.id} style={{
-              background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:12,
+              background:"#141414",border:"1px solid #141414",borderRadius:12,
               padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
             }}>
               <div style={{width:4,height:36,borderRadius:2,flexShrink:0,
-                background:t.type==="income"?"#6366f1":"#ef4444"}}/>
+                background:t.type==="income"?"#d4af37":"#f8a3a3"}}/>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:14,fontWeight:600,color:"#e2e8f0",
+                <div style={{fontSize:14,fontWeight:600,color:"#fafaf7",
                   overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
                   {t.description||t.category}
                 </div>
-                <div style={{fontSize:11,color:"#64748b",marginTop:2}}>{t.category} · {fmtD(t.date)}</div>
+                <div style={{fontSize:11,color:"#6b6b67",marginTop:2}}>{t.category} · {fmtD(t.date)}</div>
               </div>
               <div style={{fontWeight:700,fontSize:14,flexShrink:0,
-                color:t.type==="income"?"#818cf8":"#f87171"}}>
+                color:t.type==="income"?"#e8c860":"#f8a3a3"}}>
                 {t.type==="income"?"+":"−"}{fmt(+t.amount)}
               </div>
               <button onClick={()=>setModal(t)} className={BTN.edit} style={{flexShrink:0}}>✏️</button>
@@ -1796,8 +2562,8 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
                 style={{
                   padding:"4px 8px",borderRadius:6,border:"none",cursor:"pointer",
                   fontSize:12,fontWeight:700,flexShrink:0,transition:"all .15s",
-                  background:confirmDel===t.id?"#ef444433":"transparent",
-                  color:confirmDel===t.id?"#ef4444":"#64748b",
+                  background:confirmDel===t.id?"#f8a3a333":"transparent",
+                  color:confirmDel===t.id?"#f8a3a3":"#6b6b67",
                 }}
               >{confirmDel===t.id?"✓?":"🗑️"}</button>
             </div>
@@ -1846,14 +2612,14 @@ function Analytics({ projects, txs }) {
   const totalContract = projects.filter(p=>p.stage!=="Архив").reduce((s,p)=>s+(+p.contractSum||0),0);
   const totalPaid     = projects.filter(p=>p.stage!=="Архив").reduce((s,p)=>s+(+p.paidAmount||0),0);
   const payRate = totalContract>0 ? Math.round(totalPaid/totalContract*100) : 0;
-  const tt = {background:"#0f1623",border:"1px solid #1e2a3a",borderRadius:8,fontSize:12,color:"white"};
+  const tt = {background:"#141414",border:"1px solid #141414",borderRadius:8,fontSize:12,color:"white"};
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
         {[
-          {label:"Всего проектов",       value:projects.length,                                  color:"#6366f1"},
-          {label:"Завершено и оплачено", value:projects.filter(p=>p.stage==="Оплачен").length,  color:"#10b981"},
+          {label:"Всего проектов",       value:projects.length,                                  color:"#d4af37"},
+          {label:"Завершено и оплачено", value:projects.filter(p=>p.stage==="Оплачен").length,  color:"#6ee7a8"},
           {label:"Оплачено от портфеля", value:`${payRate}%`,                                   color:"#f59e0b"},
         ].map(s=>(
           <Card key={s.label} style={{textAlign:"center"}}>
@@ -1868,13 +2634,13 @@ function Analytics({ projects, txs }) {
           <SectionTitle>Портфель по типам работ</SectionTitle>
           <ResponsiveContainer width="100%" height={Math.max(140,byType.length*46)}>
             <BarChart data={byType} layout="vertical" barSize={10}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e2a3a" horizontal={false}/>
-              <XAxis type="number" tick={{fill:"#64748b",fontSize:10}} axisLine={false} tickLine={false}
+              <CartesianGrid strokeDasharray="3 3" stroke="#141414" horizontal={false}/>
+              <XAxis type="number" tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v}/>
-              <YAxis type="category" dataKey="name" tick={{fill:"#94a3b8",fontSize:11}} width={165} axisLine={false} tickLine={false}/>
+              <YAxis type="category" dataKey="name" tick={{fill:"#a8a8a3",fontSize:11}} width={165} axisLine={false} tickLine={false}/>
               <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n==="contract"?"Договор":"Оплачено"]}/>
-              <Bar dataKey="contract" name="contract" fill="#6366f1" radius={[0,4,4,0]}/>
-              <Bar dataKey="paid"     name="paid"     fill="#10b981" radius={[0,4,4,0]}/>
+              <Bar dataKey="contract" name="contract" fill="#d4af37" radius={[0,4,4,0]}/>
+              <Bar dataKey="paid"     name="paid"     fill="#6ee7a8" radius={[0,4,4,0]}/>
             </BarChart>
           </ResponsiveContainer>
         </Card>
@@ -1885,12 +2651,12 @@ function Analytics({ projects, txs }) {
           <SectionTitle>Баланс по месяцам — 12 мес.</SectionTitle>
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={months12}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e2a3a" vertical={false}/>
-              <XAxis dataKey="label" tick={{fill:"#64748b",fontSize:10}} axisLine={false} tickLine={false}/>
-              <YAxis tick={{fill:"#64748b",fontSize:10}} axisLine={false} tickLine={false}
+              <CartesianGrid strokeDasharray="3 3" stroke="#141414" vertical={false}/>
+              <XAxis dataKey="label" tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v<=-1000?`-${Math.abs(v/1000).toFixed(0)}к`:v}/>
               <Tooltip contentStyle={tt} formatter={v=>[fmt(v),"Баланс"]}/>
-              <Line type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2.5} dot={false}/>
+              <Line type="monotone" dataKey="balance" stroke="#d4af37" strokeWidth={2.5} dot={false}/>
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -1905,17 +2671,17 @@ function Analytics({ projects, txs }) {
             const w = count>0 ? Math.max(6,Math.round(count/maxC*100)) : 0;
             return (
               <div key={stage} style={{display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:160,textAlign:"right",fontSize:12,color:"#94a3b8",fontWeight:500}}>{stage}</div>
-                <div style={{flex:1,height:28,background:"#1e2a3a",borderRadius:8,overflow:"hidden"}}>
+                <div style={{width:160,textAlign:"right",fontSize:12,color:"#a8a8a3",fontWeight:500}}>{stage}</div>
+                <div style={{flex:1,height:28,background:"#141414",borderRadius:8,overflow:"hidden"}}>
                   {w>0&&(
                     <div style={{height:"100%",borderRadius:8,display:"flex",alignItems:"center",
                       justifyContent:"flex-end",paddingRight:10,fontSize:12,fontWeight:700,color:"white",
-                      width:`${w}%`,background:STAGE_META[stage]?.color||"#6366f1"}}>
+                      width:`${w}%`,background:STAGE_META[stage]?.color||"#d4af37"}}>
                       {count}
                     </div>
                   )}
                 </div>
-                <div style={{width:20,textAlign:"center",fontSize:11,color:"#475569"}}>{count}</div>
+                <div style={{width:20,textAlign:"center",fontSize:11,color:"#404040"}}>{count}</div>
               </div>
             );
           })}
@@ -1927,10 +2693,27 @@ function Analytics({ projects, txs }) {
 
 function Empty({ text }) {
   return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",
-      justifyContent:"center",padding:"56px 0",color:"#475569"}}>
-      <div style={{fontSize:36,marginBottom:12}}>📭</div>
-      <p style={{fontSize:13,margin:0}}>{text}</p>
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "48px 0",
+      color: "#62646b",
+    }}>
+      <div style={{
+        width: 48, height: 48,
+        borderRadius: 12,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 12,
+      }}>
+        <Inbox size={22} strokeWidth={1.6} style={{ color: "#62646b" }} />
+      </div>
+      <p style={{ fontSize: 13, margin: 0, color: "#9b9ca4" }}>{text}</p>
     </div>
   );
 }
@@ -2023,7 +2806,7 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
 
       {tab === "export" && (
         <div>
-          <p style={{fontSize:13,color:"#94a3b8",marginBottom:12,lineHeight:1.5}}>
+          <p style={{fontSize:13,color:"#a8a8a3",marginBottom:12,lineHeight:1.5}}>
             Все твои проекты ({projects.length}) и транзакции ({txs.length}) в формате JSON.
             Скопируй текст ниже и сохрани в файл — это твоя страховка.
             Длинный тап по полю → «Выделить всё» → «Копировать».
@@ -2056,7 +2839,7 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
 
       {tab === "import" && (
         <div>
-          <p style={{fontSize:13,color:"#94a3b8",marginBottom:12,lineHeight:1.5}}>
+          <p style={{fontSize:13,color:"#a8a8a3",marginBottom:12,lineHeight:1.5}}>
             Вставь JSON-бэкап (полученный из вкладки «Экспорт» или из старой версии артефакта).
             Все записи будут добавлены к существующим — НЕ удалят их.
           </p>
@@ -2080,17 +2863,17 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
 
       {tab === "legacy" && (
         <div>
-          <p style={{fontSize:13,color:"#94a3b8",marginBottom:12,lineHeight:1.5}}>
+          <p style={{fontSize:13,color:"#a8a8a3",marginBottom:12,lineHeight:1.5}}>
             Попытка прочитать данные из локального хранилища предыдущей версии
             (window.storage). Сработает только если этот артефакт открыт в той же
             среде Claude, что и старый. Если нет — используй вкладку «Импорт из JSON».
           </p>
           {!legacyChecked ? (
-            <p style={{color:"#64748b",fontSize:13}}>Проверяю...</p>
+            <p style={{color:"#6b6b67",fontSize:13}}>Проверяю...</p>
           ) : !legacyData || (legacyData.projects.length === 0 && legacyData.txs.length === 0) ? (
             <div style={{
-              background:"#1e2a3a",border:"1px solid #334155",borderRadius:12,
-              padding:16,textAlign:"center",color:"#94a3b8",fontSize:13,
+              background:"#141414",border:"1px solid #1c1c1a",borderRadius:12,
+              padding:16,textAlign:"center",color:"#a8a8a3",fontSize:13,
             }}>
               В локальном хранилище нет данных предыдущей версии.
               Воспользуйся вкладкой «Импорт из JSON».
@@ -2098,16 +2881,16 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
           ) : (
             <>
               <div style={{
-                background:"#1e2a3a",borderRadius:12,padding:14,marginBottom:12,
+                background:"#141414",borderRadius:12,padding:14,marginBottom:12,
                 display:"flex",justifyContent:"space-around",
               }}>
                 <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase"}}>Проектов</div>
-                  <div style={{fontSize:22,fontWeight:900,color:"#818cf8",marginTop:2}}>{legacyData.projects.length}</div>
+                  <div style={{fontSize:10,color:"#6b6b67",fontWeight:700,textTransform:"uppercase"}}>Проектов</div>
+                  <div style={{fontSize:22,fontWeight:900,color:"#e8c860",marginTop:2}}>{legacyData.projects.length}</div>
                 </div>
                 <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:10,color:"#64748b",fontWeight:700,textTransform:"uppercase"}}>Транзакций</div>
-                  <div style={{fontSize:22,fontWeight:900,color:"#22d3ee",marginTop:2}}>{legacyData.txs.length}</div>
+                  <div style={{fontSize:10,color:"#6b6b67",fontWeight:700,textTransform:"uppercase"}}>Транзакций</div>
+                  <div style={{fontSize:22,fontWeight:900,color:"#d4af37",marginTop:2}}>{legacyData.txs.length}</div>
                 </div>
               </div>
               <button
@@ -2147,8 +2930,8 @@ function ReportViewer({ projects, onClose }) {
   const dateStr       = now.toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"});
 
   const stageColor = {
-    "Переговоры":"#94a3b8","КП выслано":"#60a5fa","Договор подписан":"#a78bfa",
-    "В работе":"#fbbf24","Сдан заказчику":"#34d399","Оплачен":"#10b981","Архив":"#475569"
+    "Переговоры":"#a8a8a3","КП выслано":"#93c5fd","Договор подписан":"#d4af37",
+    "В работе":"#d4af37","Сдан заказчику":"#6ee7a8","Оплачен":"#6ee7a8","Архив":"#404040"
   };
 
   useEffect(() => {
@@ -2177,34 +2960,34 @@ function ReportViewer({ projects, onClose }) {
     const sc = stageColor;
     const rows = visible.map((p,i) => {
       const contract=+p.contractSum||0, paid=+p.paidAmount||0, debt=contract-paid;
-      const c=sc[p.stage]||"#6366f1";
+      const c=sc[p.stage]||"#d4af37";
       return `<tr style="background:${i%2===0?"white":"#fafafa"}">
         <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;">
-          <div style="font-weight:700;color:#0f172a;font-size:13px;">${p.name}</div>
-          ${p.client?`<div style="color:#64748b;font-size:11px;margin-top:1px;">${p.client}</div>`:""}
+          <div style="font-weight:700;color:#0a0a0a;font-size:13px;">${p.name}</div>
+          ${p.client?`<div style="color:#6b6b67;font-size:11px;margin-top:1px;">${p.client}</div>`:""}
         </td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#475569;">${p.type||"—"}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#475569;">${p.executor||"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#404040;">${p.type||"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;font-size:12px;color:#404040;">${p.executor||"—"}</td>
         <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;">
           <span style="display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;background:${c}22;color:${c};">${p.stage}</span>
         </td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#0f172a;font-size:13px;">${contract>0?fmt(contract):"—"}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;color:#10b981;font-size:13px;">${paid>0?fmt(paid):"—"}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;font-size:13px;color:${debt>0?"#ef4444":"#10b981"};">${contract>0?(debt>0?fmt(debt):"✓"):"—"}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#64748b;">${p.deadline?new Date(p.deadline+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short"}):"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#0a0a0a;font-size:13px;">${contract>0?fmt(contract):"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;color:#6ee7a8;font-size:13px;">${paid>0?fmt(paid):"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:700;font-size:13px;color:${debt>0?"#f8a3a3":"#6ee7a8"};">${contract>0?(debt>0?fmt(debt):"✓"):"—"}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;text-align:right;font-size:12px;color:#6b6b67;">${p.deadline?new Date(p.deadline+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short"}):"—"}</td>
       </tr>`;
     }).join("");
     el.innerHTML = `
       <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;min-height:100vh;padding:32px 24px;">
         <div style="max-width:1050px;margin:0 auto;">
-          <div style="background:linear-gradient(135deg,#1e1b4b,#312e81);border-radius:16px;padding:28px 36px;color:white;margin-bottom:20px;">
+          <div style="background:linear-gradient(135deg,#0a0a0a,#1c1c1a);border-radius:16px;padding:28px 36px;color:white;margin-bottom:20px;">
             <div style="font-size:21px;font-weight:900;letter-spacing:-.02em;margin-bottom:4px;"><span style="color:#a5b4fc;">Д</span>АНИИЛ — Отчёт по проектам</div>
             <div style="font-size:13px;opacity:.7;">Сформирован ${dateStr} · ${labels[stage]} · ${visible.length} проектов</div>
             <div style="display:flex;gap:14px;margin-top:18px;flex-wrap:wrap;">
               ${[
                 {l:"Сумма договоров",v:fmt(totalContract),c:"#93c5fd"},
                 {l:"Получено",v:fmt(totalPaid),c:"#6ee7b7"},
-                {l:"К получению",v:fmt(totalDebt),c:totalDebt>0?"#fca5a5":"#6ee7b7"},
+                {l:"К получению",v:fmt(totalDebt),c:totalDebt>0?"#f8a3a3":"#6ee7b7"},
                 {l:"% оплаты",v:`${totalContract>0?Math.round(totalPaid/totalContract*100):0}%`,c:"white"},
               ].map(k=>`<div style="background:rgba(255,255,255,.12);border-radius:12px;padding:12px 18px;min-width:130px;">
                 <div style="font-size:10px;opacity:.7;text-transform:uppercase;letter-spacing:.1em;font-weight:700;">${k.l}</div>
@@ -2213,18 +2996,18 @@ function ReportViewer({ projects, onClose }) {
             </div>
           </div>
           ${visible.length===0
-            ? `<div style="text-align:center;padding:48px;color:#94a3b8;">Нет проектов</div>`
-            : `<div style="background:white;border-radius:14px;border:1px solid #e2e8f0;overflow:hidden;margin-bottom:20px;">
+            ? `<div style="text-align:center;padding:48px;color:#a8a8a3;">Нет проектов</div>`
+            : `<div style="background:white;border-radius:14px;border:1px solid #fafaf7;overflow:hidden;margin-bottom:20px;">
                 <table style="width:100%;border-collapse:collapse;">
                   <thead><tr style="background:#f8fafc;">
-                    ${["Проект / Клиент","Тип работ","Исполнитель","Стадия","По договору","Оплачено","Остаток","Дедлайн"].map((h,i)=>`<th style="padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#94a3b8;border-bottom:2px solid #e2e8f0;text-align:${i>=4?"right":"left"};">${h}</th>`).join("")}
+                    ${["Проект / Клиент","Тип работ","Исполнитель","Стадия","По договору","Оплачено","Остаток","Дедлайн"].map((h,i)=>`<th style="padding:10px 14px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#a8a8a3;border-bottom:2px solid #fafaf7;text-align:${i>=4?"right":"left"};">${h}</th>`).join("")}
                   </tr></thead>
                   <tbody>${rows}</tbody>
                 </table>
               </div>`}
-          ${visible.some(p=>p.notes)?`<div style="background:white;border-radius:12px;border:1px solid #e2e8f0;padding:18px 22px;margin-bottom:16px;">
-            <div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">Примечания</div>
-            ${visible.filter(p=>p.notes).map(p=>`<div style="margin-bottom:6px;font-size:13px;"><b>${p.name}:</b> <span style="color:#475569;">${p.notes}</span></div>`).join("")}
+          ${visible.some(p=>p.notes)?`<div style="background:white;border-radius:12px;border:1px solid #fafaf7;padding:18px 22px;margin-bottom:16px;">
+            <div style="font-size:11px;font-weight:700;color:#a8a8a3;text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;">Примечания</div>
+            ${visible.filter(p=>p.notes).map(p=>`<div style="margin-bottom:6px;font-size:13px;"><b>${p.name}:</b> <span style="color:#404040;">${p.notes}</span></div>`).join("")}
           </div>`:""}
           <div style="text-align:center;font-size:12px;color:#cbd5e1;padding-top:8px;">Рабочий центр Даниила · ${dateStr}</div>
         </div>
@@ -2236,7 +3019,7 @@ function ReportViewer({ projects, onClose }) {
     <div style={{position:"fixed",inset:0,zIndex:200,background:"white",overflowY:"auto"}}>
       <div style={{
         position:"sticky",top:0,zIndex:10,
-        background:"#1e1b4b",padding:"10px 24px",
+        background:"#1c1c1a",padding:"10px 24px",
         display:"flex",justifyContent:"space-between",alignItems:"center",
         boxShadow:"0 2px 12px rgba(0,0,0,.3)"
       }}>
@@ -2248,18 +3031,18 @@ function ReportViewer({ projects, onClose }) {
           }}>
             <span style={{fontSize:13,color:"#a5b4fc",fontWeight:600}}>🖨 Для PDF нажми</span>
             <kbd style={{
-              background:"white",color:"#1e1b4b",borderRadius:5,
+              background:"white",color:"#1c1c1a",borderRadius:5,
               padding:"2px 8px",fontFamily:"monospace",fontSize:13,fontWeight:800,
             }}>Ctrl+P</kbd>
-            <span style={{fontSize:12,color:"#818cf8"}}>или</span>
+            <span style={{fontSize:12,color:"#e8c860"}}>или</span>
             <kbd style={{
-              background:"white",color:"#1e1b4b",borderRadius:5,
+              background:"white",color:"#1c1c1a",borderRadius:5,
               padding:"2px 8px",fontFamily:"monospace",fontSize:13,fontWeight:800,
             }}>Cmd+P</kbd>
-            <span style={{fontSize:12,color:"#818cf8"}}>→ «Сохранить как PDF»</span>
+            <span style={{fontSize:12,color:"#e8c860"}}>→ «Сохранить как PDF»</span>
           </div>
           <button onClick={()=>setShowPreview(false)} style={{
-            padding:"8px 14px",borderRadius:8,background:"#334155",border:"none",
+            padding:"8px 14px",borderRadius:8,background:"#1c1c1a",border:"none",
             color:"white",fontWeight:600,fontSize:13,cursor:"pointer"
           }}>← Назад</button>
         </div>
@@ -2268,7 +3051,7 @@ function ReportViewer({ projects, onClose }) {
         fontFamily:"system-ui,sans-serif",background:"#f8fafc",minHeight:"calc(100vh - 52px)"
       }}>
         <div style={{maxWidth:1050,margin:"0 auto",padding:"28px 24px"}}>
-          <div style={{background:"linear-gradient(135deg,#1e1b4b,#312e81)",borderRadius:16,padding:"28px 36px",color:"white",marginBottom:20}}>
+          <div style={{background:"linear-gradient(135deg,#0a0a0a,#1c1c1a)",borderRadius:16,padding:"28px 36px",color:"white",marginBottom:20}}>
             <div style={{fontSize:21,fontWeight:900,letterSpacing:"-.02em",marginBottom:4}}>
               <span style={{color:"#a5b4fc"}}>Д</span>АНИИЛ — Отчёт по проектам
             </div>
@@ -2277,7 +3060,7 @@ function ReportViewer({ projects, onClose }) {
               {[
                 {l:"Сумма договоров",v:fmt(totalContract),c:"#93c5fd"},
                 {l:"Получено",       v:fmt(totalPaid),     c:"#6ee7b7"},
-                {l:"К получению",    v:fmt(totalDebt),     c:totalDebt>0?"#fca5a5":"#6ee7b7"},
+                {l:"К получению",    v:fmt(totalDebt),     c:totalDebt>0?"#f8a3a3":"#6ee7b7"},
                 {l:"% оплаты",       v:`${totalContract>0?Math.round(totalPaid/totalContract*100):0}%`, c:"white"},
               ].map(k=>(
                 <div key={k.l} style={{background:"rgba(255,255,255,.12)",borderRadius:12,padding:"12px 18px",minWidth:130}}>
@@ -2288,14 +3071,14 @@ function ReportViewer({ projects, onClose }) {
             </div>
           </div>
           {visible.length===0
-            ? <div style={{textAlign:"center",padding:48,color:"#94a3b8",fontSize:14}}>Нет проектов</div>
-            : <div style={{background:"white",borderRadius:14,border:"1px solid #e2e8f0",overflow:"hidden",marginBottom:20}}>
+            ? <div style={{textAlign:"center",padding:48,color:"#a8a8a3",fontSize:14}}>Нет проектов</div>
+            : <div style={{background:"white",borderRadius:14,border:"1px solid #fafaf7",overflow:"hidden",marginBottom:20}}>
                 <table style={{width:"100%",borderCollapse:"collapse"}}>
                   <thead>
                     <tr style={{background:"#f8fafc"}}>
                       {["Проект / Клиент","Тип работ","Исполнитель","Стадия","По договору","Оплачено","Остаток","Дедлайн"].map((h,i)=>(
                         <th key={h} style={{padding:"10px 14px",fontSize:10,fontWeight:700,textTransform:"uppercase",
-                          letterSpacing:".1em",color:"#94a3b8",borderBottom:"2px solid #e2e8f0",
+                          letterSpacing:".1em",color:"#a8a8a3",borderBottom:"2px solid #fafaf7",
                           textAlign:i>=4?"right":"left"}}>{h}</th>
                       ))}
                     </tr>
@@ -2303,22 +3086,22 @@ function ReportViewer({ projects, onClose }) {
                   <tbody>
                     {visible.map((p,i)=>{
                       const contract=+p.contractSum||0,paid=+p.paidAmount||0,debt=contract-paid;
-                      const c=stageColor[p.stage]||"#6366f1";
+                      const c=stageColor[p.stage]||"#d4af37";
                       return (
                         <tr key={p.id} style={{background:i%2===0?"white":"#fafafa"}}>
                           <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9"}}>
-                            <div style={{fontWeight:700,color:"#0f172a",fontSize:13}}>{p.name}</div>
-                            {p.client&&<div style={{color:"#64748b",fontSize:11,marginTop:1}}>{p.client}</div>}
+                            <div style={{fontWeight:700,color:"#0a0a0a",fontSize:13}}>{p.name}</div>
+                            {p.client&&<div style={{color:"#6b6b67",fontSize:11,marginTop:1}}>{p.client}</div>}
                           </td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",fontSize:12,color:"#475569"}}>{p.type||"—"}</td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",fontSize:12,color:"#475569"}}>{p.executor||"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",fontSize:12,color:"#404040"}}>{p.type||"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",fontSize:12,color:"#404040"}}>{p.executor||"—"}</td>
                           <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9"}}>
                             <span style={{display:"inline-block",padding:"2px 9px",borderRadius:20,fontSize:11,fontWeight:700,background:c+"22",color:c}}>{p.stage}</span>
                           </td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:600,color:"#0f172a",fontSize:13}}>{contract>0?fmt(contract):"—"}</td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:700,color:"#10b981",fontSize:13}}>{paid>0?fmt(paid):"—"}</td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:700,fontSize:13,color:debt>0?"#ef4444":"#10b981"}}>{contract>0?(debt>0?fmt(debt):"✓"):"—"}</td>
-                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontSize:12,color:"#64748b"}}>{p.deadline?new Date(p.deadline+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short"}):"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:600,color:"#0a0a0a",fontSize:13}}>{contract>0?fmt(contract):"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:700,color:"#6ee7a8",fontSize:13}}>{paid>0?fmt(paid):"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontWeight:700,fontSize:13,color:debt>0?"#f8a3a3":"#6ee7a8"}}>{contract>0?(debt>0?fmt(debt):"✓"):"—"}</td>
+                          <td style={{padding:"10px 14px",borderBottom:"1px solid #f1f5f9",textAlign:"right",fontSize:12,color:"#6b6b67"}}>{p.deadline?new Date(p.deadline+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short"}):"—"}</td>
                         </tr>
                       );
                     })}
@@ -2326,11 +3109,11 @@ function ReportViewer({ projects, onClose }) {
                 </table>
               </div>}
           {visible.some(p=>p.notes)&&(
-            <div style={{background:"white",borderRadius:12,border:"1px solid #e2e8f0",padding:"18px 22px",marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Примечания</div>
+            <div style={{background:"white",borderRadius:12,border:"1px solid #fafaf7",padding:"18px 22px",marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#a8a8a3",textTransform:"uppercase",letterSpacing:".1em",marginBottom:10}}>Примечания</div>
               {visible.filter(p=>p.notes).map(p=>(
                 <div key={p.id} style={{marginBottom:6,fontSize:13}}>
-                  <b>{p.name}:</b> <span style={{color:"#475569"}}>{p.notes}</span>
+                  <b>{p.name}:</b> <span style={{color:"#404040"}}>{p.notes}</span>
                 </div>
               ))}
             </div>
@@ -2345,32 +3128,32 @@ function ReportViewer({ projects, onClose }) {
 
   return (
     <Modal title="📄 Экспорт отчёта" onClose={onClose} maxWidth={440}>
-      <p style={{fontSize:13,color:"#94a3b8",marginBottom:16,lineHeight:1.6}}>
+      <p style={{fontSize:13,color:"#a8a8a3",marginBottom:16,lineHeight:1.6}}>
         Отчёт откроется прямо здесь. Нажми «Печать / PDF» — браузер сохранит красивый PDF который можно отправить заказчику.
       </p>
       <div style={{marginBottom:16}}>
-        <p style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",
+        <p style={{fontSize:10,fontWeight:700,color:"#6b6b67",textTransform:"uppercase",
           letterSpacing:"0.12em",marginBottom:8}}>Фильтр по стадии</p>
         <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
           {stages.map(s=>(
             <button key={s} onClick={()=>setStage(s)} style={{
               padding:"5px 12px",borderRadius:20,fontSize:12,fontWeight:600,cursor:"pointer",
-              background:stage===s?"#4f46e5":"#1e2a3a",
-              color:stage===s?"white":"#94a3b8",
+              background:stage===s?"#d4af37":"#141414",
+              color:stage===s?"white":"#a8a8a3",
               border:"none",transition:"all .15s",
             }}>{labels[s]}</button>
           ))}
         </div>
       </div>
       <div style={{
-        padding:"12px 16px",background:"#1e2a3a",borderRadius:12,marginBottom:16,
+        padding:"12px 16px",background:"#141414",borderRadius:12,marginBottom:16,
         display:"flex",justifyContent:"space-between",alignItems:"center",
       }}>
-        <span style={{fontSize:13,color:"#94a3b8"}}>Проектов в отчёте</span>
-        <span style={{fontSize:18,fontWeight:900,color:"#818cf8"}}>{visible.length}</span>
+        <span style={{fontSize:13,color:"#a8a8a3"}}>Проектов в отчёте</span>
+        <span style={{fontSize:18,fontWeight:900,color:"#e8c860"}}>{visible.length}</span>
       </div>
       <button onClick={()=>setShowPreview(true)} style={{
-        width:"100%",padding:14,borderRadius:14,background:"#4f46e5",border:"none",
+        width:"100%",padding:14,borderRadius:14,background:"#d4af37",border:"none",
         color:"white",fontSize:15,fontWeight:700,cursor:"pointer",
       }}>
         👁 Открыть отчёт
@@ -2510,29 +3293,77 @@ export default function App() {
   // ───────────────────────────────────────────────────────────────────────
 
   if (phase === "loading") return (
-    <div style={{minHeight:"100vh",background:"#080e1a",display:"flex",
-      alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:"#6366f1",fontWeight:700,letterSpacing:"0.15em",
-        fontSize:13,textTransform:"uppercase"}}>Подключаемся к серверу...</div>
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0a",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontFamily: "'Geist Variable', system-ui, sans-serif",
+    }}>
+      <motion.div
+        animate={{ rotate: 360 }}
+        transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+        style={{
+          width: 36, height: 36,
+          border: "2px solid rgba(212,175,55,0.15)",
+          borderTopColor: "#e8c860",
+          borderRadius: "50%",
+        }}
+      />
     </div>
   );
 
   if (phase === "error") return (
-    <div style={{minHeight:"100vh",background:"#080e1a",color:"white",
-      display:"flex",alignItems:"center",justifyContent:"center",padding:24,
-      fontFamily:"system-ui,-apple-system,sans-serif"}}>
-      <Card style={{maxWidth:400,textAlign:"center"}}>
-        <div style={{fontSize:42,marginBottom:14}}>⚠️</div>
-        <div style={{fontSize:16,fontWeight:700,color:"white",marginBottom:8}}>
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0a",
+      color: "#f7f8f8",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 24,
+      fontFamily: "'Geist Variable', system-ui, sans-serif",
+    }}>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="glass-card"
+        style={{ maxWidth: 400, textAlign: "center", borderRadius: 16, padding: 24 }}
+      >
+        <div style={{
+          width: 56, height: 56,
+          borderRadius: 14,
+          background: "rgba(248,163,163,0.12)",
+          border: "1px solid rgba(248,163,163,0.30)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          margin: "0 auto 16px",
+          color: "#f8a3a3",
+        }}>
+          <AlertTriangle size={28} strokeWidth={1.8} />
+        </div>
+        <div style={{
+          fontSize: 17,
+          fontWeight: 600,
+          color: "#f7f8f8",
+          marginBottom: 8,
+          letterSpacing: "-0.02em",
+        }}>
           Ошибка подключения
         </div>
-        <p style={{fontSize:13,color:"#94a3b8",marginBottom:20,lineHeight:1.5}}>
+        <p style={{ fontSize: 13, color: "#9b9ca4", marginBottom: 20, lineHeight: 1.5 }}>
           {errorMsg}
         </p>
-        <button onClick={()=>window.location.reload()} className={BTN.primary} style={{width:"100%"}}>
+        <button
+          onClick={() => window.location.reload()}
+          className={BTN.primary}
+          style={{ width: "100%" }}
+        >
           Попробовать снова
         </button>
-      </Card>
+      </motion.div>
     </div>
   );
 
@@ -2545,93 +3376,250 @@ export default function App() {
 
   // phase === "ready"
   const TABS = [
-    {id:"dashboard", label:"Дашборд",   icon:"◈"},
-    {id:"projects",  label:"Проекты",   icon:"▦"},
-    {id:"finance",   label:"Финансы",   icon:"◎"},
-    {id:"analytics", label:"Аналитика", icon:"◇"},
+    { id: "dashboard", label: "Дашборд",   Icon: LayoutDashboard },
+    { id: "projects",  label: "Проекты",   Icon: FolderKanban },
+    { id: "finance",   label: "Финансы",   Icon: Receipt },
+    { id: "analytics", label: "Аналитика", Icon: BarChart3 },
   ];
 
   return (
-    <div style={{minHeight:"100vh",background:"#080e1a",color:"white",
-      fontFamily:"system-ui,-apple-system,sans-serif"}}>
+    <div style={{
+      minHeight: "100vh",
+      background: "#0a0a0a",
+      color: "#f7f8f8",
+      fontFamily: "'Geist Variable', system-ui, -apple-system, sans-serif",
+    }}>
 
-      {/* Header */}
-      <div style={{borderBottom:"1px solid #1e2a3a",padding:"14px 24px",
-        display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+      {/* Шапка с логотипом, действиями и информацией о пользователе */}
+      <div style={{
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        padding: "14px 24px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 12,
+        background: "rgba(8,9,15,0.85)",
+        backdropFilter: "blur(8px)",
+        position: "sticky",
+        top: 0,
+        zIndex: 50,
+      }}>
+        {/* Логотип */}
         <div>
-          <h1 style={{margin:0,fontSize:17,fontWeight:900,letterSpacing:"-0.02em"}}>
-            <span style={{color:"#6366f1"}}>Д</span>АНИИЛ
-            <span style={{color:"#334155",fontWeight:400,fontSize:13,marginLeft:8}}>/ рабочий центр</span>
+          <h1 style={{
+            margin: 0,
+            fontSize: 17,
+            fontWeight: 700,
+            letterSpacing: "-0.025em",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}>
+            <span style={{
+              background: "linear-gradient(135deg, #d4af37, #e8c860)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
+            }}>ДАНИИЛ</span>
+            <span style={{
+              color: "#62646b",
+              fontWeight: 400,
+              fontSize: 13,
+            }}>· рабочий центр</span>
           </h1>
-          <p style={{margin:"2px 0 0",fontSize:10,color:"#334155",
-            textTransform:"uppercase",letterSpacing:"0.1em"}}>
-            Проекты · Финансы · Аналитика
-          </p>
         </div>
 
-        <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:6}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
-            <button onClick={()=>setReportModal(true)} style={{
-              fontSize:11,padding:"4px 10px",borderRadius:8,cursor:"pointer",fontWeight:600,
-              background:"#4f46e533",border:"1px solid #6366f1",color:"#818cf8",
-            }} title="Экспорт отчёта для заказчика">
-              📄 Отчёт
+        {/* Правая часть: кнопки действий и информация о пользователе */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {/* Кнопка отчёта — акцентная, в фирменном цвете */}
+            <button
+              onClick={() => setReportModal(true)}
+              style={{
+                fontSize: 12,
+                padding: "6px 12px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 500,
+                background: "rgba(212,175,55,0.12)",
+                border: "1px solid rgba(212,175,55,0.30)",
+                color: "#e8c860",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.18s",
+                fontFamily: "inherit",
+              }}
+              title="Экспорт отчёта для заказчика"
+            >
+              <FileText size={13} strokeWidth={2.2} />
+              Отчёт
             </button>
-            <button onClick={()=>setBackupModal(true)} style={{
-              fontSize:11,padding:"4px 10px",borderRadius:8,cursor:"pointer",fontWeight:600,
-              background:"#1e2a3a",border:"1px solid #334155",color:"#94a3b8",
-            }} title="Резерв и миграция данных">
-              📦 Резерв
+            {/* Кнопка резерва — нейтральная */}
+            <button
+              onClick={() => setBackupModal(true)}
+              style={{
+                fontSize: 12,
+                padding: "6px 12px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 500,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                color: "#9b9ca4",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.18s",
+                fontFamily: "inherit",
+              }}
+              title="Резерв и миграция данных"
+            >
+              <Package size={13} strokeWidth={2.2} />
+              Резерв
             </button>
-            <button onClick={handleSignOut} style={{
-              fontSize:11,padding:"4px 10px",borderRadius:8,cursor:"pointer",fontWeight:600,
-              background:"#ef444422",border:"1px solid #ef444444",color:"#fca5a5",
-            }} title="Выйти из аккаунта">
-              ⎋ Выход
+            {/* Кнопка выхода — в красноватом цвете опасности */}
+            <button
+              onClick={handleSignOut}
+              style={{
+                fontSize: 12,
+                padding: "6px 12px",
+                borderRadius: 8,
+                cursor: "pointer",
+                fontWeight: 500,
+                background: "rgba(248,163,163,0.10)",
+                border: "1px solid rgba(248,163,163,0.25)",
+                color: "#f8a3a3",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.18s",
+                fontFamily: "inherit",
+              }}
+              title="Выйти из аккаунта"
+            >
+              <LogOut size={13} strokeWidth={2.2} />
+              Выход
             </button>
-            <div style={{fontSize:11,color:"#475569"}}>
-              {new Date().toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
+            <div style={{ fontSize: 11, color: "#62646b", marginLeft: 4 }}>
+              {new Date().toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })}
             </div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {profile?.role==="admin" && (
+          {/* Бейдж администратора и email */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {profile?.role === "admin" && (
               <span style={{
-                fontSize:9,padding:"2px 7px",borderRadius:5,fontWeight:700,
-                background:"#fbbf2422",color:"#fbbf24",letterSpacing:"0.08em",
-              }}>ADMIN</span>
+                fontSize: 9,
+                padding: "2px 7px",
+                borderRadius: 5,
+                fontWeight: 600,
+                background: "rgba(243,215,123,0.12)",
+                color: "#f3d77b",
+                border: "1px solid rgba(243,215,123,0.25)",
+                letterSpacing: "0.08em",
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}>
+                <Sparkles size={9} strokeWidth={2.4} />
+                ADMIN
+              </span>
             )}
             <div style={{
-              fontSize:10,padding:"2px 8px",borderRadius:6,fontWeight:600,
-              background:"#10b98122",color:"#10b981",
+              fontSize: 11,
+              padding: "3px 9px",
+              borderRadius: 6,
+              fontWeight: 500,
+              background: "rgba(110,231,168,0.10)",
+              color: "#6ee7a8",
+              border: "1px solid rgba(110,231,168,0.20)",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
             }}>
-              ☁ {profile?.email}
+              <Cloud size={11} strokeWidth={2.2} />
+              {profile?.email}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tab nav */}
-      <div style={{borderBottom:"1px solid #1e2a3a",padding:"0 24px",display:"flex",overflowX:"auto"}}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} style={{
-            padding:"14px 20px",fontSize:13,fontWeight:600,
-            color: tab===t.id?"#818cf8":"#64748b",
-            background:"none",border:"none",
-            borderBottom:`2px solid ${tab===t.id?"#6366f1":"transparent"}`,
-            cursor:"pointer",transition:"all 0.2s",
-            display:"flex",alignItems:"center",gap:6,whiteSpace:"nowrap",
-          }}>
-            <span style={{fontSize:15}}>{t.icon}</span> {t.label}
-          </button>
-        ))}
+      {/* Навигация по вкладкам с активным индикатором */}
+      <div style={{
+        borderBottom: "1px solid rgba(255,255,255,0.06)",
+        padding: "0 24px",
+        display: "flex",
+        overflowX: "auto",
+        background: "rgba(8,9,15,0.85)",
+        backdropFilter: "blur(8px)",
+        position: "sticky",
+        top: 64,
+        zIndex: 40,
+      }}>
+        {TABS.map(t => {
+          const isActive = tab === t.id;
+          const TabIcon = t.Icon;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                padding: "12px 18px",
+                fontSize: 13,
+                fontWeight: 500,
+                color: isActive ? "#e8c860" : "#9b9ca4",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                transition: "color 0.2s",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                whiteSpace: "nowrap",
+                position: "relative",
+                fontFamily: "inherit",
+              }}
+            >
+              <TabIcon size={15} strokeWidth={isActive ? 2.4 : 2} />
+              {t.label}
+              {/* Анимированная подложка под активным табом — плавно перетекает между табами */}
+              {isActive && (
+                <motion.div
+                  layoutId="activeTabIndicator"
+                  style={{
+                    position: "absolute",
+                    bottom: -1,
+                    left: 0,
+                    right: 0,
+                    height: 2,
+                    background: "linear-gradient(90deg, #d4af37, #e8c860)",
+                    borderRadius: 2,
+                  }}
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Page content */}
-      <div style={{padding:24,maxWidth:960,margin:"0 auto"}}>
-        {tab==="dashboard"  && <Dashboard  projects={projects} txs={txs}/>}
-        {tab==="projects"   && <Projects   projects={projects} setProjects={setProjects} client={supabase} ownerId={profile.id} showToast={showToast}/>}
-        {tab==="finance"    && <Finance    txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast}/>}
-        {tab==="analytics"  && <Analytics  projects={projects} txs={txs}/>}
+      {/* Содержимое страницы — обёрнуто в AnimatePresence для плавных переходов */}
+      <div style={{ padding: 24, maxWidth: 1080, margin: "0 auto" }}>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+          >
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} />}
+            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} client={supabase} ownerId={profile.id} showToast={showToast} />}
+            {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
+            {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       <Toast visible={toast.visible} text={toast.text} type={toast.type}/>
