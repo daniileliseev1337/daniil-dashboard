@@ -15,6 +15,9 @@ import {
   ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck,
   Building2, MapPin, Hash, Star, Activity, ScrollText, BookUser,
   ChevronDown, IdCard, Phone as PhoneIcon,
+  // ── v2.0: иконки маркетплейса, комментариев, файлов ──
+  Globe, Store, Undo2, MessageSquare,
+  Paperclip, Download, HardDrive, FileImage, Lock, Unlock,
 } from "lucide-react";
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
@@ -61,7 +64,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 // CONSTANTS — справочники проекта
 // ════════════════════════════════════════════════════════════════════════════
 const PROJECT_STAGES = [
-  "Переговоры","КП выслано","Договор подписан",
+  "Поиск исполнителя","Переговоры","КП выслано","Договор подписан",
   "В работе","Сдан заказчику","Оплачен","Архив"
 ];
 const PROJECT_TYPES = [
@@ -76,11 +79,12 @@ const EXPENSE_CATS = [
   "Жильё / аренда","Транспорт","Такси","Питание","Кофе",
   "Здоровье / аптека","Обучение / курсы","ПО и инструменты",
   "Связь","Развлечения","Кредит / займы","Табак",
-  "Римма","Родители","Прочие расходы"
+  "Партнёр","Семья","Питомцы","Дети","Подарки","Прочие расходы"
 ];
 
 const STAGE_META = {
-  "Переговоры":       { color:"#6b6b67", progress:10  },
+  "Поиск исполнителя": { color:"#93c5fd", progress:0   },
+  "Переговоры":        { color:"#6b6b67", progress:10  },
   "КП выслано":       { color:"#93c5fd", progress:25  },
   "Договор подписан": { color:"#d4af37", progress:40  },
   "В работе":         { color:"#d4af37", progress:65  },
@@ -101,7 +105,9 @@ const LEGACY_KEY_TXS      = "dash2_txs";
 // ════════════════════════════════════════════════════════════════════════════
 const fmt      = n  => new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB",maximumFractionDigits:0}).format(+n||0);
 const fmtD     = d  => d ? new Date(d+"T00:00:00").toLocaleDateString("ru-RU") : "—";
+const fmtDT    = dt => dt ? new Date(dt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
 const todayStr = () => new Date().toISOString().slice(0,10);
+const fmtSize  = b  => b >= 1048576 ? `${(b/1048576).toFixed(1)} МБ` : b >= 1024 ? `${(b/1024).toFixed(0)} КБ` : `${b} Б`;
 
 // ════════════════════════════════════════════════════════════════════════════
 // FIELD MAPPING — переводчик между БД (snake_case) и JS UI (camelCase)
@@ -133,6 +139,8 @@ function projectDbToJs(row) {
     clientTelegram: row.client_telegram || "",
     // Поля v1.5 — связь с записью клиента
     clientId:       row.client_id || null,
+    // Поля v2.0 — маркетплейс
+    takenBy:        row.taken_by || null,
   };
 }
 
@@ -276,6 +284,81 @@ async function updateProject(client, id, project, ownerId) {
 
 async function deleteProjectDb(client, id) {
   const { error } = await client.from("projects").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// ── v2.0: функции маркетплейса ────────────────────────────────────────────
+
+async function takeProject(client, projectId) {
+  const { error } = await client.rpc("take_project", { p_project_id: projectId });
+  if (error) throw error;
+}
+
+async function releaseProject(client, projectId) {
+  const { error } = await client.rpc("release_project", { p_project_id: projectId });
+  if (error) throw error;
+}
+
+async function revokeProject(client, projectId) {
+  const { error } = await client.rpc("revoke_project", { p_project_id: projectId });
+  if (error) throw error;
+}
+
+async function setProjectVisibilityUsers(client, projectId, userIds) {
+  const { error } = await client.rpc("set_project_visibility_users", {
+    p_project_id: projectId,
+    p_user_ids: userIds,
+  });
+  if (error) throw error;
+}
+
+async function getProjectVisibilityUsers(client, projectId) {
+  const { data, error } = await client.rpc("get_project_visibility_users", {
+    p_project_id: projectId,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── v2.0: функции комментариев ────────────────────────────────────────────
+
+async function fetchProjectComments(client, projectId) {
+  const { data, error } = await client.rpc("get_project_comments", {
+    p_project_id: projectId,
+  });
+  if (error) throw error;
+  return (data || []).map(r => ({
+    id:          r.id,
+    projectId:   r.project_id,
+    authorId:    r.author_id,
+    authorName:  r.author_name || "Пользователь",
+    authorEmail: r.author_email || "",
+    content:     r.content,
+    resolved:    r.resolved,
+    resolvedAt:  r.resolved_at,
+    createdAt:   r.created_at,
+  }));
+}
+
+async function insertProjectComment(client, projectId, content) {
+  const { error } = await client
+    .from("project_comments")
+    .insert({ project_id: projectId, author_id: (await client.auth.getUser()).data.user.id, content });
+  if (error) throw error;
+}
+
+async function resolveProjectComment(client, commentId, resolved = true) {
+  const { error } = await client.rpc("resolve_project_comment", {
+    p_comment_id: commentId,
+    p_resolved:   resolved,
+  });
+  if (error) throw error;
+}
+
+async function deleteProjectComment(client, commentId) {
+  const { error } = await client.rpc("delete_project_comment", {
+    p_comment_id: commentId,
+  });
   if (error) throw error;
 }
 
@@ -480,6 +563,87 @@ async function fetchProfile(client, userId) {
     .single();
   if (error) throw error;
   return data;
+}
+
+// ── v2.0: Telegram-функции ────────────────────────────────────────────────
+
+async function generateTelegramLinkCode(client) {
+  const { data, error } = await client.rpc("generate_telegram_link_code");
+  if (error) throw error;
+  return data; // строка — 8-символьный код
+}
+
+async function unlinkTelegram(client) {
+  const { error } = await client.rpc("unlink_telegram");
+  if (error) throw error;
+}
+
+async function updateNotificationSettings(client, settings) {
+  const { error } = await client.rpc("update_notification_settings", {
+    p_project_taken: settings.notifProjectTaken,
+    p_team_invite:   settings.notifTeamInvite,
+    p_comment:       settings.notifComment,
+    p_deadline:      settings.notifDeadline,
+  });
+  if (error) throw error;
+}
+
+// Отправка Telegram-уведомления через Edge Function.
+// Ошибки подавляются — уведомления best-effort.
+async function sendTelegramNotify(client, type, recipientId, data = {}) {
+  try {
+    await client.functions.invoke("telegram-notify", {
+      body: { type, recipientId, ...data },
+    });
+  } catch (e) {
+    console.warn("Telegram notify failed:", e);
+  }
+}
+
+// ── v2.0: Yandex Disk — функции файлового хранилища ──────────────────────
+
+async function ydAction(client, action, payload = {}) {
+  const { data, error } = await client.functions.invoke("yandex-disk", {
+    body: { action, ...payload },
+  });
+  if (error) throw error;
+  if (data && !data.ok) throw new Error(data.error || "Ошибка Yandex Disk");
+  return data;
+}
+
+async function fetchProjectFiles(client, projectId) {
+  const res = await ydAction(client, "list", { projectId });
+  return res.files || [];
+}
+
+async function uploadProjectFile(client, projectId, file, isPublic) {
+  // Читаем файл как base64
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = () => reject(new Error("Ошибка чтения файла"));
+    reader.readAsDataURL(file);
+  });
+  return ydAction(client, "upload", {
+    projectId,
+    filename:   file.name,
+    mimeType:   file.type || "application/octet-stream",
+    isPublic,
+    fileBase64: base64,
+  });
+}
+
+async function getDownloadUrl(client, diskPath) {
+  const res = await ydAction(client, "download-url", { diskPath });
+  return res.url;
+}
+
+async function toggleFilePublic(client, fileId, diskPath, makePublic) {
+  return ydAction(client, "toggle-public", { fileId, diskPath, makePublic });
+}
+
+async function deleteProjectFile(client, fileId) {
+  return ydAction(client, "delete", { fileId });
 }
 
 async function signInWithPassword(client, email, password) {
@@ -1194,10 +1358,44 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     clientPhone: "", clientEmail: "", clientTelegram: "",
     // v1.5 поля
     clientId: null,
+    // v2.0 поля
+    visibilityUsers: [], // для режима selected: [{id, email, name}]
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
-  // Управление списком ссылок: добавление пустой записи, удаление по индексу,
+  // v2.0: состояние поиска пользователей для режима selected
+  const [visUserQuery, setVisUserQuery] = useState("");
+  const [visUserResults, setVisUserResults] = useState([]);
+
+  // Загружаем список visibilityUsers при открытии формы редактирования
+  useEffect(() => {
+    if (initial?.id && initial?.visibility === "selected" && client) {
+      getProjectVisibilityUsers(client, initial.id).then(users => {
+        setF(p => ({ ...p, visibilityUsers: users }));
+      }).catch(() => {});
+    }
+  }, [initial?.id, initial?.visibility]); // eslint-disable-line
+
+  // Поиск пользователей для selected-списка
+  useEffect(() => {
+    if (f.visibility !== "selected" || !client) return;
+    const t = setTimeout(async () => {
+      const res = await searchApprovedUsers(client, visUserQuery);
+      // Исключаем уже добавленных
+      const addedIds = new Set((f.visibilityUsers || []).map(u => u.id));
+      setVisUserResults(res.filter(u => !addedIds.has(u.id)));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [visUserQuery, f.visibility, f.visibilityUsers]); // eslint-disable-line
+
+  const addVisUser = (user) => {
+    setF(p => ({ ...p, visibilityUsers: [...(p.visibilityUsers || []), user] }));
+    setVisUserQuery("");
+    setVisUserResults([]);
+  };
+  const removeVisUser = (id) => {
+    setF(p => ({ ...p, visibilityUsers: (p.visibilityUsers || []).filter(u => u.id !== id) }));
+  };
   // редактирование отдельных полей конкретной записи
   const addLink = () => {
     setF(p => ({ ...p, links: [...(p.links || []), { title: "", url: "" }] }));
@@ -1411,8 +1609,99 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         <StyledSelect value={f.visibility} onChange={e => s("visibility", e.target.value)}>
           <option value="private">Личный (только я)</option>
           <option value="team">Командный (видят все одобренные)</option>
+          <option value="selected">Избранные (только выбранные пользователи)</option>
+          <option value="marketplace">Маркетплейс (ищу исполнителя)</option>
         </StyledSelect>
       </Field>
+
+      {/* ── Баннер маркетплейса ─────────────────────────────────────────── */}
+      {f.visibility === "marketplace" && (
+        <div style={{
+          marginBottom: 14, padding: "10px 14px",
+          background: "rgba(147,197,253,0.06)",
+          border: "1px solid rgba(147,197,253,0.20)",
+          borderRadius: 10,
+          fontSize: 12, color: "#93c5fd", lineHeight: 1.5,
+        }}>
+          <div style={{ fontWeight: 700, marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+            <Store size={13} strokeWidth={2.2} />
+            Проект попадёт в маркетплейс
+          </div>
+          Стадия проекта должна быть «Поиск исполнителя». Любой одобренный пользователь системы
+          сможет увидеть проект и нажать «Взять в работу». После взятия проект уйдёт из маркетплейса.
+        </div>
+      )}
+
+      {/* ── Пикер пользователей для режима selected ─────────────────────── */}
+      {f.visibility === "selected" && (
+        <div style={{
+          marginBottom: 14, padding: "12px 14px",
+          background: "rgba(212,175,55,0.04)",
+          border: "1px solid rgba(212,175,55,0.12)",
+          borderRadius: 10,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: "#d4af37",
+            textTransform: "uppercase", letterSpacing: "0.10em",
+            marginBottom: 10, display: "flex", alignItems: "center", gap: 6,
+          }}>
+            <Eye size={12} strokeWidth={2.4} />
+            Кому показать проект
+          </div>
+
+          {/* Поиск пользователя */}
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <StyledInput
+              value={visUserQuery}
+              onChange={e => setVisUserQuery(e.target.value)}
+              placeholder="Поиск по email или имени…"
+            />
+            {visUserResults.length > 0 && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, overflow: "hidden", marginTop: 2,
+              }}>
+                {visUserResults.map(u => (
+                  <div key={u.id}
+                    onClick={() => addVisUser(u)}
+                    style={{
+                      padding: "8px 12px", cursor: "pointer", fontSize: 12,
+                      borderBottom: "1px solid rgba(255,255,255,0.06)",
+                      transition: "background 0.12s",
+                    }}
+                    onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.10)"}
+                    onMouseOut={e => e.currentTarget.style.background = "transparent"}
+                  >
+                    <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                    {u.name && <span style={{ color: "#6b6b67", marginLeft: 8 }}>{u.email}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Список добавленных */}
+          {(f.visibilityUsers || []).length === 0
+            ? <p style={{ fontSize: 11, color: "#6b6b67", margin: 0 }}>Никто не добавлен — проект будет виден только вам</p>
+            : (f.visibilityUsers || []).map(u => (
+              <div key={u.id} style={{
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "5px 10px", marginBottom: 4,
+                background: "rgba(255,255,255,0.03)", borderRadius: 6,
+              }}>
+                <span style={{ fontSize: 12, color: "#fafaf7" }}>{u.name || u.email}</span>
+                <button onClick={() => removeVisUser(u.id)} style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: "#f8a3a3", padding: 2, lineHeight: 1,
+                }}>
+                  <X size={12} />
+                </button>
+              </div>
+            ))
+          }
+        </div>
+      )}
 
       {/* ═══ СЕКЦИЯ: Команда проекта (v1.5) ═══ */}
       {initial && initial.id && client && (
@@ -1437,6 +1726,60 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             client={client}
             showToast={showToast}
             canManage={isOwner || profile?.role === "admin"}
+          />
+        </div>
+      )}
+
+      {/* ═══ СЕКЦИЯ: Комментарии (v2.0) ═══ */}
+      {initial && initial.id && client && (
+        <div style={{
+          marginBottom: 14, padding: "12px 14px",
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 10,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 11, fontWeight: 600, color: "#a8a8a3",
+            textTransform: "uppercase", letterSpacing: "0.10em",
+            marginBottom: 12,
+          }}>
+            <MessageSquare size={12} strokeWidth={2.4} />
+            Комментарии
+          </div>
+          <CommentsSection
+            projectId={initial.id}
+            profile={profile}
+            client={client}
+            showToast={showToast}
+            isOwner={isOwner}
+          />
+        </div>
+      )}
+
+      {/* ═══ СЕКЦИЯ: Файлы на Yandex Disk (v2.0) ═══ */}
+      {initial && initial.id && client && (
+        <div style={{
+          marginBottom: 14, padding: "12px 14px",
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.07)",
+          borderRadius: 10,
+        }}>
+          <div style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontSize: 11, fontWeight: 600, color: "#a8a8a3",
+            textTransform: "uppercase", letterSpacing: "0.10em",
+            marginBottom: 12,
+          }}>
+            <HardDrive size={12} strokeWidth={2.4} />
+            Файлы проекта
+          </div>
+          <ProjectFiles
+            projectId={initial.id}
+            profile={profile}
+            client={client}
+            showToast={showToast}
+            isOwner={isOwner}
           />
         </div>
       )}
@@ -1615,7 +1958,7 @@ function Dashboard({ projects, txs }) {
                 <Pie data={stageData} cx="50%" cy="50%" innerRadius={56} outerRadius={84} dataKey="value" paddingAngle={3}>
                   {stageData.map((e, i) => <Cell key={i} fill={e.fill} stroke="transparent" />)}
                 </Pie>
-                <Tooltip contentStyle={tt} formatter={(v, n) => [`${v} проектов`, n]} />
+                <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v, n) => [`${v} проектов`, n]} />
                 <Legend
                   iconType="circle"
                   iconSize={8}
@@ -1634,7 +1977,7 @@ function Dashboard({ projects, txs }) {
                 <XAxis dataKey="label" tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false}
                   tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}к` : v} />
-                <Tooltip contentStyle={tt} formatter={(v, n) => [fmt(v), n === "inc" ? "Доходы" : "Расходы"]} />
+                <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v, n) => [fmt(v), n === "inc" ? "Доходы" : "Расходы"]} />
                 <Bar dataKey="inc" name="inc" fill="#d4af37" radius={[5, 5, 0, 0]} />
                 <Bar dataKey="exp" name="exp" fill="#f8a3a3" radius={[5, 5, 0, 0]} />
               </BarChart>
@@ -1748,14 +2091,20 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
   const saveProject = async (form) => {
     setSaving(true);
     try {
+      let saved;
       if (modal === "add") {
-        const created = await insertProject(client, form, ownerId);
-        setProjects(prev => [created, ...prev]);
+        saved = await insertProject(client, form, ownerId);
+        setProjects(prev => [saved, ...prev]);
         showToast("✓ Проект создан");
       } else {
-        const updated = await updateProject(client, modal.id, form, ownerId);
-        setProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+        saved = await updateProject(client, modal.id, form, ownerId);
+        setProjects(prev => prev.map(p => p.id === saved.id ? saved : p));
         showToast("✓ Проект обновлён");
+      }
+      // v2.0: сохраняем список видимости для режима selected
+      if (form.visibility === "selected" && saved?.id) {
+        const userIds = (form.visibilityUsers || []).map(u => u.id);
+        await setProjectVisibilityUsers(client, saved.id, userIds);
       }
       setModal(null);
     } catch (e) {
@@ -1778,25 +2127,33 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
     }
   };
 
-  const visible = stageFilter==="Все" ? projects : projects.filter(p=>p.stage===stageFilter);
+  const visible = stageFilter === "Свободные"
+    ? projects.filter(p => p.visibility === "marketplace" && !p.takenBy)
+    : stageFilter === "Все"
+      ? projects
+      : projects.filter(p => p.stage === stageFilter);
   const todayS  = todayStr();
 
   return (
     <div>
       <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20,alignItems:"center"}}>
         <div style={{display:"flex",flexWrap:"wrap",gap:6,flex:1}}>
-          {["Все",...PROJECT_STAGES].map(s=>(
-            <Chip key={s}
-              label={`${s}${s==="Все"?` (${projects.length})`:projects.filter(p=>p.stage===s).length>0?` (${projects.filter(p=>p.stage===s).length})`:""}`}
-              active={stageFilter===s} onClick={()=>setStageFilter(s)}/>
-          ))}
+          {["Все","Свободные",...PROJECT_STAGES].map(s=>{
+            const freeCount = projects.filter(p=>p.visibility==="marketplace"&&!p.takenBy).length;
+            const cnt = s==="Все" ? projects.length : s==="Свободные" ? freeCount : projects.filter(p=>p.stage===s).length;
+            return (
+              <Chip key={s}
+                label={`${s}${cnt>0?` (${cnt})`:""}`}
+                active={stageFilter===s} onClick={()=>setStageFilter(s)}/>
+            );
+          })}
         </div>
         <button onClick={()=>setModal("add")} className={BTN.primary}>+ Новый проект</button>
       </div>
 
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         {visible.length===0
-          ? <Empty text={stageFilter==="Все"?"Нет проектов — нажми «Новый проект»":`Нет проектов со стадией «${stageFilter}»`}/>
+          ? <Empty text={stageFilter==="Свободные"?"Нет свободных проектов в маркетплейсе":stageFilter==="Все"?"Нет проектов — нажми «Новый проект»":`Нет проектов со стадией «${stageFilter}»`}/>
           : visible.map(p=>{
             const meta = STAGE_META[p.stage]||{color:"#d4af37",progress:0};
             const isAwaitingPayment = p.stage==="Сдан заказчику";
@@ -1814,7 +2171,10 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                       <PermissionBadge role={
                         p.ownerId === profile?.id ? "owner"
                           : profile?.role === "admin" ? "admin"
+                          : p.takenBy === profile?.id ? "editor"
                           : p.visibility === "team" ? "viewer"
+                          : p.visibility === "marketplace" ? "marketplace"
+                          : p.visibility === "selected" ? "selected"
                           : null
                       } />
                       {isAwaitingPayment&&<span style={{fontSize:11,color:"#d4af37",fontWeight:600}}>⏳ Ожидает оплаты</span>}
@@ -1990,18 +2350,87 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                     )}
                     {p.notes&&<p style={{margin:"10px 0 0",fontSize:11,color:"#6b6b67",fontStyle:"italic"}}>{p.notes}</p>}
                   </div>
-                  <div style={{display:"flex",gap:4,flexShrink:0}}>
-                    <button onClick={()=>setModal(p)} className={BTN.edit}>✏️</button>
-                    <button onClick={()=>{if(confirmDel===p.id){del(p.id);}else{setConfirmDel(p.id);}}}
-                      style={{
-                        padding:"4px 8px",borderRadius:6,border:"none",cursor:"pointer",
-                        fontSize:12,fontWeight:700,transition:"all .15s",
-                        background:confirmDel===p.id?"#f8a3a333":"transparent",
-                        color:confirmDel===p.id?"#f8a3a3":"#6b6b67",
-                      }}
-                      onBlur={()=>setConfirmDel(null)}
-                      title={confirmDel===p.id?"Нажми ещё раз чтобы удалить":"Удалить проект"}
-                    >{confirmDel===p.id?"✓?":"🗑️"}</button>
+                  {/* ═══ КНОПКИ ДЕЙСТВИЙ ═══ */}
+                  <div style={{display:"flex",flexDirection:"column",gap:4,flexShrink:0,alignItems:"flex-end"}}>
+                    {/* Владелец или admin: редактировать + удалить + маркетплейс */}
+                    {(p.ownerId===profile?.id||profile?.role==="admin")&&(
+                      <>
+                        <button onClick={()=>setModal(p)} className={BTN.edit}>✏️</button>
+                        <button onClick={()=>{if(confirmDel===p.id){del(p.id);}else{setConfirmDel(p.id);}}}
+                          style={{
+                            padding:"4px 8px",borderRadius:6,border:"none",cursor:"pointer",
+                            fontSize:12,fontWeight:700,transition:"all .15s",
+                            background:confirmDel===p.id?"#f8a3a333":"transparent",
+                            color:confirmDel===p.id?"#f8a3a3":"#6b6b67",
+                          }}
+                          onBlur={()=>setConfirmDel(null)}
+                          title={confirmDel===p.id?"Нажми ещё раз чтобы удалить":"Удалить проект"}
+                        >{confirmDel===p.id?"✓?":"🗑️"}</button>
+                        {p.visibility==="marketplace"&&p.takenBy&&(
+                          <button
+                            onClick={async()=>{
+                              try{
+                                await revokeProject(client,p.id);
+                                setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
+                                showToast("Проект возвращён в маркетплейс");
+                              }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
+                            }}
+                            style={{
+                              display:"flex",alignItems:"center",gap:4,
+                              padding:"4px 8px",borderRadius:6,border:"1px solid rgba(248,163,163,0.30)",
+                              background:"rgba(248,163,163,0.08)",color:"#f8a3a3",
+                              fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap",
+                            }}
+                            title="Отозвать у исполнителя"
+                          ><Undo2 size={11} strokeWidth={2.4}/>Отозвать</button>
+                        )}
+                      </>
+                    )}
+                    {/* Исполнитель (взял проект): кнопка «Вернуть» */}
+                    {p.takenBy===profile?.id&&p.ownerId!==profile?.id&&(
+                      <button
+                        onClick={async()=>{
+                          try{
+                            await releaseProject(client,p.id);
+                            setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
+                            showToast("Проект возвращён в маркетплейс");
+                          }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
+                        }}
+                        style={{
+                          display:"flex",alignItems:"center",gap:4,
+                          padding:"4px 10px",borderRadius:6,border:"1px solid rgba(243,215,123,0.30)",
+                          background:"rgba(243,215,123,0.08)",color:"#f3d77b",
+                          fontSize:11,fontWeight:600,cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap",
+                        }}
+                        title="Вернуть в маркетплейс"
+                      ><Undo2 size={11} strokeWidth={2.4}/>Вернуть</button>
+                    )}
+                    {/* Свободный маркетплейс-проект: кнопка «Взять» */}
+                    {p.visibility==="marketplace"&&!p.takenBy&&p.ownerId!==profile?.id&&(
+                      <button
+                        onClick={async()=>{
+                          try{
+                            await takeProject(client,p.id);
+                            setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:profile?.id,stage:"В работе"}:x));
+                            showToast("✓ Проект взят в работу");
+                            // Уведомление владельцу проекта
+                            sendTelegramNotify(client,"project_taken",p.ownerId,{
+                              projectName:p.name,
+                              actorName:profile?.name||profile?.email,
+                            });
+                          }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
+                        }}
+                        style={{
+                          display:"flex",alignItems:"center",gap:5,
+                          padding:"6px 12px",borderRadius:8,border:"1px solid rgba(110,231,168,0.35)",
+                          background:"rgba(110,231,168,0.10)",color:"#6ee7a8",
+                          fontSize:12,fontWeight:700,cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap",
+                        }}
+                        onMouseOver={e=>{e.currentTarget.style.background="rgba(110,231,168,0.18)";}}
+                        onMouseOut={e=>{e.currentTarget.style.background="rgba(110,231,168,0.10)";}}
+                        title="Взять проект в работу"
+                      ><UserCheck size={13} strokeWidth={2.4}/>Взять в работу</button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2072,8 +2501,7 @@ const CAT_RULES = [
   ]},
   { cat:"Здоровье / аптека", keys:[
     "gorzdrav","горздрав","36,6","36.6","aptechnoe","аптека","apteka",
-    "rigla","ригла","pharmacy","зоомагазин","chetyre lap","zoomagazin",
-    "четыре лапы","antistress","ulybka radugi","улыбка радуги",
+    "rigla","ригла","pharmacy","antistress","ulybka radugi","улыбка радуги",
   ]},
   { cat:"Развлечения", keys:[
     "mori sinema","mori_sinema","синема","cinema","кино",
@@ -2104,8 +2532,11 @@ const CAT_RULES = [
     "жкх","квитанция","аренда","управляющая","тсж",
     "водоканал","мосэнерго","газпром","коммунал","еирц",
   ]},
-  { cat:"Римма",    keys:["римма романовна","римма"] },
-  { cat:"Родители", keys:["владимир васильевич е","елена александровна е","родители"] },
+  { cat:"Партнёр",  keys:["партнёр","партнер"] },
+  { cat:"Семья",    keys:["родители","семья"] },
+  { cat:"Питомцы",  keys:["зоомагазин","chetyre lap","zoomagazin","четыре лапы","зоо","vet ","ветклиника","ветеринар","petshop","pet shop"] },
+  { cat:"Дети",     keys:["детский","детская","детсад","детский сад","игрушки","rosnova","школа"] },
+  { cat:"Подарки",  keys:["подарок","gift","цветы","флорист","flower","букет"] },
   { cat:"Прочий доход", keys:[
     "капитализация","начисление процентов","кэшбэк","cashback",
     "возврат средств","отмена оплаты","внесение наличных","входящий перевод",
@@ -2757,7 +3188,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
                   <Pie data={incByCat} cx="50%" cy="50%" innerRadius={38} outerRadius={62} dataKey="value" paddingAngle={2}>
                     {incByCat.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
-                  <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n]}/>
+                  <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n]}/>
                   <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
@@ -2771,7 +3202,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
                   <Pie data={expByCat} cx="50%" cy="50%" innerRadius={38} outerRadius={62} dataKey="value" paddingAngle={2}>
                     {expByCat.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
-                  <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n]}/>
+                  <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n]}/>
                   <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
@@ -2885,7 +3316,7 @@ function Analytics({ projects, txs }) {
               <XAxis type="number" tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v}/>
               <YAxis type="category" dataKey="name" tick={{fill:"#a8a8a3",fontSize:11}} width={165} axisLine={false} tickLine={false}/>
-              <Tooltip contentStyle={tt} formatter={(v,n)=>[fmt(v),n==="contract"?"Договор":"Оплачено"]}/>
+              <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n==="contract"?"Договор":"Оплачено"]}/>
               <Bar dataKey="contract" name="contract" fill="#d4af37" radius={[0,4,4,0]}/>
               <Bar dataKey="paid"     name="paid"     fill="#6ee7a8" radius={[0,4,4,0]}/>
             </BarChart>
@@ -2902,7 +3333,7 @@ function Analytics({ projects, txs }) {
               <XAxis dataKey="label" tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}/>
               <YAxis tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v<=-1000?`-${Math.abs(v/1000).toFixed(0)}к`:v}/>
-              <Tooltip contentStyle={tt} formatter={v=>[fmt(v),"Баланс"]}/>
+              <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={v=>[fmt(v),"Баланс"]}/>
               <Line type="monotone" dataKey="balance" stroke="#d4af37" strokeWidth={2.5} dot={false}/>
             </LineChart>
           </ResponsiveContainer>
@@ -2984,10 +3415,12 @@ function useProjectRole(project, profile, projectMembers) {
 // Бейдж роли пользователя на проекте — отображается в правом верхнем углу карточки
 function PermissionBadge({ role }) {
   const config = {
-    owner:  { label: "Мой",                Icon: Crown,       color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
-    admin:  { label: "Admin",              Icon: ShieldCheck, color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
-    editor: { label: "Команда · редактор", Icon: PencilLine,  color: "#6ee7a8", bg: "rgba(110,231,168,0.10)", border: "rgba(110,231,168,0.25)" },
-    viewer: { label: "Команда",            Icon: Users,       color: "#93c5fd", bg: "rgba(147,197,253,0.10)", border: "rgba(147,197,253,0.25)" },
+    owner:       { label: "Мой",                Icon: Crown,       color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
+    admin:       { label: "Admin",              Icon: ShieldCheck, color: "#d4af37", bg: "rgba(212,175,55,0.12)",  border: "rgba(212,175,55,0.30)"  },
+    editor:      { label: "Команда · редактор", Icon: PencilLine,  color: "#6ee7a8", bg: "rgba(110,231,168,0.10)", border: "rgba(110,231,168,0.25)" },
+    viewer:      { label: "Команда",            Icon: Users,       color: "#93c5fd", bg: "rgba(147,197,253,0.10)", border: "rgba(147,197,253,0.25)" },
+    marketplace: { label: "Маркетплейс",        Icon: Store,       color: "#93c5fd", bg: "rgba(147,197,253,0.08)", border: "rgba(147,197,253,0.22)" },
+    selected:    { label: "Приглашён",          Icon: Eye,         color: "#f3d77b", bg: "rgba(243,215,123,0.08)", border: "rgba(243,215,123,0.22)" },
   };
   const c = config[role];
   if (!c) return null;
@@ -3026,6 +3459,455 @@ function UserAvatar({ name, email, size = 28 }) {
         flexShrink: 0,
       }}
     >{initials}</span>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// COMMENTS SECTION — секция комментариев в форме проекта (v2.0)
+// ════════════════════════════════════════════════════════════════════════════
+function CommentsSection({ projectId, profile, client, showToast, isOwner }) {
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [text, setText]         = useState("");
+  const [sending, setSending]   = useState(false);
+  const [showResolved, setShowResolved] = useState(false);
+
+  const reload = async () => {
+    if (!projectId || !client) return;
+    setLoading(true);
+    try {
+      const list = await fetchProjectComments(client, projectId);
+      setComments(list);
+    } catch (e) {
+      showToast("Ошибка загрузки комментариев: " + (e.message || ""), "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [projectId]); // eslint-disable-line
+
+  const send = async () => {
+    if (!text.trim()) return;
+    setSending(true);
+    try {
+      const trimmed = text.trim();
+      await insertProjectComment(client, projectId, trimmed);
+      setText("");
+      await reload();
+      // Уведомление всем участникам проекта (best-effort, через Edge Function)
+      sendTelegramNotify(client, "comment", null, {
+        projectId,
+        commentText: trimmed,
+        actorName: profile?.name || profile?.email,
+        actorId: profile?.id,
+      });
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || "не удалось отправить"), "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const resolve = async (commentId, val) => {
+    try {
+      await resolveProjectComment(client, commentId, val);
+      setComments(prev => prev.map(c =>
+        c.id === commentId ? { ...c, resolved: val, resolvedAt: val ? new Date().toISOString() : null } : c
+      ));
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const remove = async (commentId) => {
+    try {
+      await deleteProjectComment(client, commentId);
+      setComments(prev => prev.filter(c => c.id !== commentId));
+      showToast("Комментарий удалён");
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const open     = comments.filter(c => !c.resolved);
+  const resolved = comments.filter(c =>  c.resolved);
+
+  const CommentCard = ({ c }) => {
+    const isMe    = c.authorId === profile?.id;
+    const canDel  = isMe || profile?.role === "admin";
+    const canRes  = isMe || isOwner || profile?.role === "admin";
+    return (
+      <div style={{
+        display: "flex", gap: 10, padding: "10px 0",
+        borderBottom: "1px solid rgba(255,255,255,0.05)",
+        opacity: c.resolved ? 0.5 : 1,
+        transition: "opacity 0.2s",
+      }}>
+        <UserAvatar name={c.authorName} email={c.authorEmail} size={28} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "#fafaf7" }}>
+              {c.authorName}
+            </span>
+            <span style={{ fontSize: 10, color: "#6b6b67" }}>{fmtDT(c.createdAt)}</span>
+            {c.resolved && (
+              <span style={{
+                fontSize: 10, fontWeight: 600, color: "#6ee7a8",
+                padding: "1px 6px", borderRadius: 4,
+                background: "rgba(110,231,168,0.08)",
+                border: "1px solid rgba(110,231,168,0.20)",
+              }}>✓ Решено</span>
+            )}
+          </div>
+          <p style={{
+            margin: 0, fontSize: 13, color: "#a8a8a3",
+            lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word",
+          }}>{c.content}</p>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            {canRes && !c.resolved && (
+              <button onClick={() => resolve(c.id, true)} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 11, color: "#6ee7a8", padding: 0,
+                textDecoration: "underline", textUnderlineOffset: 2,
+              }}>✓ Отметить как решённое</button>
+            )}
+            {canRes && c.resolved && (
+              <button onClick={() => resolve(c.id, false)} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 11, color: "#6b6b67", padding: 0,
+                textDecoration: "underline", textUnderlineOffset: 2,
+              }}>↩ Переоткрыть</button>
+            )}
+            {canDel && (
+              <button onClick={() => remove(c.id)} style={{
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 11, color: "#f8a3a3", padding: 0,
+                textDecoration: "underline", textUnderlineOffset: 2,
+              }}>Удалить</button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      {/* Список открытых комментариев */}
+      {loading ? (
+        <p style={{ fontSize: 12, color: "#6b6b67", margin: "0 0 10px" }}>Загрузка…</p>
+      ) : open.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#6b6b67", margin: "0 0 10px" }}>Пока нет комментариев</p>
+      ) : (
+        <div style={{ marginBottom: 4 }}>
+          {open.map(c => <CommentCard key={c.id} c={c} />)}
+        </div>
+      )}
+
+      {/* Ввод нового комментария */}
+      <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "flex-end" }}>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); }}
+          placeholder="Добавить комментарий… (Ctrl+Enter для отправки)"
+          rows={2}
+          style={{
+            flex: 1, background: "#0a0a0a",
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 8, padding: "8px 10px",
+            color: "#fafaf7", fontSize: 13, resize: "none",
+            fontFamily: "inherit", lineHeight: 1.5,
+            WebkitTextFillColor: "#fafaf7",
+          }}
+        />
+        <button
+          onClick={send}
+          disabled={sending || !text.trim()}
+          style={{
+            padding: "8px 14px", borderRadius: 8,
+            background: text.trim() ? "#d4af37" : "rgba(212,175,55,0.20)",
+            border: "none", cursor: text.trim() ? "pointer" : "default",
+            color: text.trim() ? "#0a0a0a" : "#6b6b67",
+            fontSize: 12, fontWeight: 700,
+            transition: "all 0.15s", whiteSpace: "nowrap",
+            opacity: sending ? 0.6 : 1,
+          }}
+        >
+          {sending ? "…" : "Отправить"}
+        </button>
+      </div>
+      <p style={{ fontSize: 10, color: "#404040", margin: "4px 0 0" }}>Ctrl+Enter — отправить</p>
+
+      {/* Аккордеон решённых комментариев */}
+      {resolved.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <button
+            onClick={() => setShowResolved(v => !v)}
+            style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "#6b6b67", fontSize: 11, padding: 0,
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <ChevronDown
+              size={12} strokeWidth={2.4}
+              style={{ transform: showResolved ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}
+            />
+            Решённые ({resolved.length})
+          </button>
+          {showResolved && (
+            <div style={{ marginTop: 6, opacity: 0.7 }}>
+              {resolved.map(c => <CommentCard key={c.id} c={c} />)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PROJECT FILES — файловое хранилище проекта через Yandex Disk (v2.0)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Иконка файла по MIME-типу
+function FileTypeIcon({ mimeType }) {
+  const m = mimeType || "";
+  if (m.startsWith("image/"))
+    return <FileImage size={14} strokeWidth={2} style={{ color: "#93c5fd" }} />;
+  if (m === "application/pdf")
+    return <FileText size={14} strokeWidth={2} style={{ color: "#f8a3a3" }} />;
+  return <FileText size={14} strokeWidth={2} style={{ color: "#a8a8a3" }} />;
+}
+
+function ProjectFiles({ projectId, profile, client, showToast, isOwner }) {
+  const [files, setFiles]       = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [uploadPublic, setUploadPublic] = useState(false);
+  const [usedBytes, setUsedBytes] = useState(0);
+  const fileInputRef = useRef(null);
+
+  const MAX_PROJ_BYTES = 100 * 1024 * 1024; // 100 МБ
+  const usedPct = Math.min(100, (usedBytes / MAX_PROJ_BYTES) * 100);
+
+  const reload = async () => {
+    if (!projectId || !client) return;
+    setLoading(true);
+    try {
+      const list = await fetchProjectFiles(client, projectId);
+      setFiles(list);
+      setUsedBytes(list.reduce((s, f) => s + (f.file_size || 0), 0));
+    } catch (e) {
+      showToast("Ошибка загрузки файлов: " + (e.message || ""), "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, [projectId]); // eslint-disable-line
+
+  const handleFileSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) {
+      showToast("Файл слишком большой: максимум 20 МБ", "error");
+      return;
+    }
+    setUploading(true);
+    try {
+      await uploadProjectFile(client, projectId, file, uploadPublic);
+      showToast("✓ Файл загружен");
+      await reload();
+    } catch (e) {
+      showToast("Ошибка загрузки: " + (e.message || ""), "error");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDownload = async (f) => {
+    try {
+      if (f.is_public && f.public_url) {
+        window.open(f.public_url, "_blank");
+      } else {
+        showToast("Получаем ссылку…");
+        const url = await getDownloadUrl(client, f.disk_path);
+        window.open(url, "_blank");
+      }
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const handleTogglePublic = async (f) => {
+    try {
+      const res = await toggleFilePublic(client, f.id, f.disk_path, !f.is_public);
+      setFiles(prev => prev.map(x =>
+        x.id === f.id ? { ...x, is_public: !f.is_public, public_url: res.publicUrl || null } : x
+      ));
+      showToast(f.is_public ? "Файл сделан приватным" : "Файл опубликован");
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const handleDelete = async (f) => {
+    try {
+      await deleteProjectFile(client, f.id);
+      setFiles(prev => prev.filter(x => x.id !== f.id));
+      setUsedBytes(prev => Math.max(0, prev - (f.file_size || 0)));
+      showToast("Файл удалён");
+    } catch (e) {
+      showToast("Ошибка удаления: " + (e.message || ""), "error");
+    }
+  };
+
+  const canDelete = (f) =>
+    f.owner_id === profile?.id
+    || isOwner
+    || profile?.role === "admin";
+
+  return (
+    <div>
+      {/* Шкала использования хранилища */}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#6b6b67", marginBottom: 4 }}>
+          <span>Использовано: {fmtSize(usedBytes)}</span>
+          <span>Лимит: 100 МБ</span>
+        </div>
+        <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2, overflow: "hidden" }}>
+          <div style={{
+            height: "100%", borderRadius: 2, transition: "width 0.4s",
+            width: `${usedPct}%`,
+            background: usedPct > 85 ? "#f8a3a3" : usedPct > 60 ? "#f3d77b" : "#6ee7a8",
+          }} />
+        </div>
+      </div>
+
+      {/* Список файлов */}
+      {loading ? (
+        <p style={{ fontSize: 12, color: "#6b6b67", margin: "0 0 8px" }}>Загрузка…</p>
+      ) : files.length === 0 ? (
+        <p style={{ fontSize: 12, color: "#6b6b67", margin: "0 0 8px" }}>Файлов пока нет</p>
+      ) : (
+        <div style={{ marginBottom: 8 }}>
+          {files.map(f => (
+            <div key={f.id} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+            }}>
+              <FileTypeIcon mimeType={f.mime_type} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 500, color: "#fafaf7",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>{f.filename}</div>
+                <div style={{ fontSize: 10, color: "#6b6b67", marginTop: 1 }}>
+                  {fmtSize(f.file_size)} · {fmtDT(f.created_at)} · {f.uploader_name}
+                  {f.is_public && (
+                    <span style={{ marginLeft: 6, color: "#6ee7a8" }}>● публичный</span>
+                  )}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                {/* Скачать */}
+                <button
+                  onClick={() => handleDownload(f)}
+                  title="Открыть / скачать"
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "#a8a8a3", padding: 4, lineHeight: 1,
+                    transition: "color 0.15s",
+                  }}
+                  onMouseOver={e => e.currentTarget.style.color = "#d4af37"}
+                  onMouseOut={e => e.currentTarget.style.color = "#a8a8a3"}
+                >
+                  <Download size={13} strokeWidth={2.2} />
+                </button>
+                {/* Публичность (только загрузивший или владелец) */}
+                {(f.owner_id === profile?.id || isOwner || profile?.role === "admin") && (
+                  <button
+                    onClick={() => handleTogglePublic(f)}
+                    title={f.is_public ? "Сделать приватным" : "Опубликовать"}
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: f.is_public ? "#6ee7a8" : "#6b6b67", padding: 4, lineHeight: 1,
+                      transition: "color 0.15s",
+                    }}
+                    onMouseOver={e => e.currentTarget.style.color = "#d4af37"}
+                    onMouseOut={e => e.currentTarget.style.color = f.is_public ? "#6ee7a8" : "#6b6b67"}
+                  >
+                    {f.is_public
+                      ? <Unlock size={13} strokeWidth={2.2} />
+                      : <Lock size={13} strokeWidth={2.2} />
+                    }
+                  </button>
+                )}
+                {/* Удалить */}
+                {canDelete(f) && (
+                  <button
+                    onClick={() => handleDelete(f)}
+                    title="Удалить файл"
+                    style={{
+                      background: "none", border: "none", cursor: "pointer",
+                      color: "#6b6b67", padding: 4, lineHeight: 1,
+                      transition: "color 0.15s",
+                    }}
+                    onMouseOver={e => e.currentTarget.style.color = "#f8a3a3"}
+                    onMouseOut={e => e.currentTarget.style.color = "#6b6b67"}
+                  >
+                    <Trash2 size={13} strokeWidth={2.2} />
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Кнопка загрузки + переключатель публичности */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4 }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="*/*"
+          style={{ display: "none" }}
+          onChange={handleFileSelect}
+        />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={uploading || usedBytes >= MAX_PROJ_BYTES}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 8,
+            background: "rgba(212,175,55,0.08)",
+            border: "1px solid rgba(212,175,55,0.25)",
+            color: "#d4af37", fontSize: 12, fontWeight: 600,
+            cursor: uploading || usedBytes >= MAX_PROJ_BYTES ? "default" : "pointer",
+            opacity: uploading || usedBytes >= MAX_PROJ_BYTES ? 0.5 : 1,
+            transition: "all 0.15s",
+          }}
+        >
+          <Paperclip size={12} strokeWidth={2.4} />
+          {uploading ? "Загрузка…" : "Прикрепить файл"}
+        </button>
+        {/* Переключатель приватности для следующей загрузки */}
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", userSelect: "none" }}>
+          <input
+            type="checkbox"
+            checked={uploadPublic}
+            onChange={e => setUploadPublic(e.target.checked)}
+            style={{ accentColor: "#d4af37" }}
+          />
+          <span style={{ fontSize: 11, color: "#6b6b67" }}>Публичный</span>
+        </label>
+        <span style={{ fontSize: 10, color: "#404040", marginLeft: "auto" }}>макс. 20 МБ</span>
+      </div>
+    </div>
   );
 }
 
@@ -3195,6 +4077,11 @@ function MembersManager({ projectId, profile, client, showToast, canManage }) {
     try {
       await addProjectMember(client, projectId, selectedUser.id, selectedRole);
       showToast(`✓ ${selectedUser.name || selectedUser.email} приглашён(а)`);
+      // Уведомление приглашённому пользователю
+      sendTelegramNotify(client, "team_invite", selectedUser.id, {
+        projectName: "(проект)",
+        actorName: profile?.name || profile?.email,
+      });
       setSelectedUser(null);
       setSearchQuery("");
       setSearchResults([]);
@@ -3775,8 +4662,24 @@ function ClientsPage({ clients, setClients, projects, client, ownerId, showToast
 // PROFILE MODAL — настройки своего профиля (v1.5)
 // ════════════════════════════════════════════════════════════════════════════
 function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast }) {
-  const [name, setName] = useState(profile?.name || "");
-  const [saving, setSaving] = useState(false);
+  const [name, setSaveName]      = useState(profile?.name || "");
+  const [saving, setSaving]      = useState(false);
+
+  // Telegram state
+  const [linkCode, setLinkCode]  = useState(null);
+  const [genLoading, setGenLoad] = useState(false);
+  const [unlinking, setUnlink]   = useState(false);
+
+  // Notification settings — initialise from profile
+  const [notifs, setNotifs] = useState({
+    notifProjectTaken: profile?.notif_project_taken !== false,
+    notifTeamInvite:   profile?.notif_team_invite   !== false,
+    notifComment:      profile?.notif_comment        !== false,
+    notifDeadline:     profile?.notif_deadline       !== false,
+  });
+  const [savingNotifs, setSavingNotifs] = useState(false);
+
+  const isLinked = !!profile?.telegram_chat_id;
 
   const save = async () => {
     setSaving(true);
@@ -3798,6 +4701,81 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     }
   };
 
+  const generateCode = async () => {
+    setGenLoad(true);
+    try {
+      const code = await generateTelegramLinkCode(client);
+      setLinkCode(code);
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    } finally {
+      setGenLoad(false);
+    }
+  };
+
+  const doUnlink = async () => {
+    setUnlink(true);
+    try {
+      await unlinkTelegram(client);
+      onProfileUpdated({ ...profile, telegram_chat_id: null });
+      showToast("Telegram отвязан");
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    } finally {
+      setUnlink(false);
+    }
+  };
+
+  const saveNotifs = async (updated) => {
+    setSavingNotifs(true);
+    try {
+      await updateNotificationSettings(client, updated);
+      onProfileUpdated({ ...profile,
+        notif_project_taken: updated.notifProjectTaken,
+        notif_team_invite:   updated.notifTeamInvite,
+        notif_comment:       updated.notifComment,
+        notif_deadline:      updated.notifDeadline,
+      });
+    } catch (e) {
+      showToast("Ошибка сохранения настроек: " + (e.message || ""), "error");
+    } finally {
+      setSavingNotifs(false);
+    }
+  };
+
+  const toggleNotif = (key) => {
+    const updated = { ...notifs, [key]: !notifs[key] };
+    setNotifs(updated);
+    saveNotifs(updated);
+  };
+
+  // UI-компонент переключателя уведомления
+  const NotifToggle = ({ label, notifKey }) => (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "7px 0", borderBottom: "1px solid rgba(255,255,255,0.04)",
+    }}>
+      <span style={{ fontSize: 12, color: "#a8a8a3" }}>{label}</span>
+      <button
+        onClick={() => toggleNotif(notifKey)}
+        disabled={savingNotifs}
+        style={{
+          width: 36, height: 20, borderRadius: 10, border: "none",
+          cursor: "pointer", transition: "all 0.2s", padding: 0,
+          background: notifs[notifKey] ? "#d4af37" : "rgba(255,255,255,0.10)",
+          position: "relative",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 2,
+          left: notifs[notifKey] ? 18 : 2,
+          width: 16, height: 16, borderRadius: "50%",
+          background: "#fafaf7", transition: "left 0.2s",
+        }} />
+      </button>
+    </div>
+  );
+
   return (
     <Modal
       title="Мой профиль"
@@ -3805,6 +4783,7 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
       icon={<User size={16} />}
       maxWidth={460}
     >
+      {/* Шапка профиля */}
       <div style={{
         display: "flex", alignItems: "center", gap: 14, marginBottom: 18,
         padding: "12px 14px", borderRadius: 12,
@@ -3830,19 +4809,117 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
         )}
       </div>
 
+      {/* Отображаемое имя */}
       <Field label="Отображаемое имя">
         <StyledInput
           value={name}
-          onChange={e => setName(e.target.value)}
+          onChange={e => setSaveName(e.target.value)}
           placeholder="Например: Даниил Елисеев"
           onKeyDown={e => { if (e.key === "Enter") save(); }}
         />
       </Field>
-
       <div style={{ fontSize: 11, color: "#6b6b67", marginBottom: 16, lineHeight: 1.5 }}>
-        Это имя видят другие участники команды на проектах, в которые ты приглашён.
-        Email и роль изменить нельзя — для этого обратись к администратору.
+        Это имя видят другие участники команды. Email и роль изменить нельзя.
       </div>
+
+      {/* ── Telegram-привязка ─────────────────────────────────────────────── */}
+      <div style={{
+        marginBottom: 16, padding: "12px 14px", borderRadius: 10,
+        background: isLinked ? "rgba(110,231,168,0.04)" : "rgba(147,197,253,0.04)",
+        border: `1px solid ${isLinked ? "rgba(110,231,168,0.15)" : "rgba(147,197,253,0.15)"}`,
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
+          textTransform: "uppercase", marginBottom: 10,
+          color: isLinked ? "#6ee7a8" : "#93c5fd",
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
+          <Send size={11} strokeWidth={2.4} />
+          Telegram
+          {isLinked && <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— привязан ✓</span>}
+        </div>
+
+        {isLinked ? (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, color: "#a8a8a3" }}>
+              Уведомления настроены ниже
+            </span>
+            <button
+              onClick={doUnlink}
+              disabled={unlinking}
+              style={{
+                fontSize: 11, padding: "4px 10px", borderRadius: 6,
+                background: "rgba(248,163,163,0.08)", border: "1px solid rgba(248,163,163,0.25)",
+                color: "#f8a3a3", cursor: "pointer",
+              }}
+            >
+              {unlinking ? "…" : "Отвязать"}
+            </button>
+          </div>
+        ) : (
+          <>
+            {!linkCode ? (
+              <>
+                <p style={{ fontSize: 12, color: "#a8a8a3", margin: "0 0 10px", lineHeight: 1.5 }}>
+                  Привяжи Telegram чтобы получать уведомления о событиях в проектах.
+                </p>
+                <button
+                  onClick={generateCode}
+                  disabled={genLoading}
+                  className={BTN.primary}
+                  style={{ width: "100%", opacity: genLoading ? 0.6 : 1 }}
+                >
+                  {genLoading ? "Генерируем…" : "Привязать Telegram"}
+                </button>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 12, color: "#a8a8a3", margin: "0 0 8px", lineHeight: 1.5 }}>
+                  Открой Telegram, найди бота <b>@daniilcoop_bot</b> и отправь ему:
+                </p>
+                <div style={{
+                  background: "#0a0a0a", borderRadius: 8, padding: "8px 12px",
+                  fontFamily: "ui-monospace, monospace", fontSize: 15,
+                  color: "#d4af37", letterSpacing: "0.15em", textAlign: "center",
+                  border: "1px solid rgba(212,175,55,0.25)",
+                  marginBottom: 8,
+                }}>
+                  /start {linkCode}
+                </div>
+                <p style={{ fontSize: 10, color: "#6b6b67", margin: 0 }}>
+                  Код действует 10 минут. После отправки страница обновится автоматически.
+                </p>
+                <button
+                  onClick={generateCode}
+                  style={{
+                    marginTop: 8, fontSize: 11, color: "#6b6b67",
+                    background: "none", border: "none", cursor: "pointer", padding: 0,
+                    textDecoration: "underline",
+                  }}
+                >
+                  Обновить код
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* ── Настройки уведомлений (только если привязан) ─────────────────── */}
+      {isLinked && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
+            textTransform: "uppercase", marginBottom: 8, color: "#6b6b67",
+          }}>
+            Уведомления
+          </div>
+          <NotifToggle label="Кто-то взял мой проект из маркетплейса"    notifKey="notifProjectTaken" />
+          <NotifToggle label="Меня пригласили в команду проекта"          notifKey="notifTeamInvite" />
+          <NotifToggle label="Новый комментарий в проекте"                notifKey="notifComment" />
+          <NotifToggle label="До дедлайна проекта осталось 3 дня"         notifKey="notifDeadline" />
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Закрыть</button>
