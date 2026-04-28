@@ -612,8 +612,9 @@ async function ydAction(client, action, payload = {}) {
 }
 
 async function fetchProjectFiles(client, projectId) {
-  const res = await ydAction(client, "list", { projectId });
-  return res.files || [];
+  const { data, error } = await client.rpc("get_project_files", { p_project_id: projectId });
+  if (error) throw error;
+  return data || [];
 }
 
 async function uploadProjectFile(client, projectId, file, isPublic) {
