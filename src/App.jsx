@@ -3801,13 +3801,21 @@ function ProjectFiles({ projectId, profile, client, showToast, isOwner }) {
 
   const handleDownload = async (f) => {
     try {
+      let url;
       if (f.is_public && f.public_url) {
-        window.open(f.public_url, "_blank");
+        url = f.public_url;
       } else {
         showToast("Получаем ссылку…");
-        const url = await getDownloadUrl(client, f.disk_path);
-        window.open(url, "_blank");
+        url = await getDownloadUrl(client, f.disk_path);
       }
+      // Создаём временный <a> для скачивания
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = f.filename;
+      a.target = "_blank";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (e) {
       showToast("Ошибка: " + (e.message || ""), "error");
     }
