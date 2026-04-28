@@ -1654,6 +1654,7 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             <StyledInput
               value={visUserQuery}
               onChange={e => setVisUserQuery(e.target.value)}
+              onBlur={() => setTimeout(() => setVisUserResults([]), 200)}
               placeholder="Поиск по email или имени…"
             />
             {visUserResults.length > 0 && (
@@ -2103,7 +2104,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       }
       // v2.0: сохраняем список видимости для режима selected
       if (form.visibility === "selected" && saved?.id) {
-        const userIds = (form.visibilityUsers || []).map(u => u.id);
+        const userIds = (form.visibilityUsers || []).map(u => u.id).filter(Boolean);
         await setProjectVisibilityUsers(client, saved.id, userIds);
       }
       setModal(null);
@@ -2411,7 +2412,12 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                         onClick={async()=>{
                           try{
                             await takeProject(client,p.id);
-                            setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:profile?.id,stage:"В работе"}:x));
+                            // Обновляем executor в БД именем исполнителя
+                            const executorName = profile?.name || profile?.email || "";
+                            if (executorName) {
+                              await client.from("projects").update({ executor: executorName }).eq("id", p.id);
+                            }
+                            setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:profile?.id,stage:"В работе",executor:executorName}:x));
                             showToast("✓ Проект взят в работу");
                             // Уведомление владельцу проекта
                             sendTelegramNotify(client,"project_taken",p.ownerId,{
