@@ -1360,6 +1360,7 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     clientId: null,
     // v2.0 поля
     visibilityUsers: [], // для режима selected: [{id, email, name}]
+    executorUserId: null, // UUID исполнителя для Telegram-уведомления
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -1379,9 +1380,9 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
   // Поиск пользователей для selected-списка
   useEffect(() => {
     if (f.visibility !== "selected" || !client) return;
+    if (!visUserQuery.trim()) { setVisUserResults([]); return; }
     const t = setTimeout(async () => {
       const res = await searchApprovedUsers(client, visUserQuery);
-      // Исключаем уже добавленных
       const addedIds = new Set((f.visibilityUsers || []).map(u => u.id));
       setVisUserResults(res.filter(u => !addedIds.has(u.id)));
     }, 300);
@@ -1395,6 +1396,25 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
   };
   const removeVisUser = (id) => {
     setF(p => ({ ...p, visibilityUsers: (p.visibilityUsers || []).filter(u => u.id !== id) }));
+  };
+
+  // v2.0: поиск исполнителя по пользователям системы
+  const [execQuery, setExecQuery]     = useState("");
+  const [execResults, setExecResults] = useState([]);
+
+  useEffect(() => {
+    if (!client || !execQuery.trim()) { setExecResults([]); return; }
+    const t = setTimeout(async () => {
+      const res = await searchApprovedUsers(client, execQuery);
+      setExecResults(res);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [execQuery]); // eslint-disable-line
+
+  const selectExecUser = (user) => {
+    setF(p => ({ ...p, executor: user.name || user.email, executorUserId: user.id }));
+    setExecQuery("");
+    setExecResults([]);
   };
   // редактирование отдельных полей конкретной записи
   const addLink = () => {
@@ -1442,9 +1462,41 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             <StyledInput value={f.client} onChange={e => s("client", e.target.value)} />
           )}
         </div>
-        <div><Label>Исполнитель</Label>
-          <StyledInput value={f.executor} onChange={e => s("executor", e.target.value)}
-            placeholder="Н-р: Даниил, Субподряд" /></div>
+        <div style={{ position: "relative" }}><Label>Исполнитель</Label>
+          <StyledInput value={f.executor}
+            onChange={e => { s("executor", e.target.value); s("executorUserId", null); setExecQuery(e.target.value); }}
+            onBlur={() => setTimeout(() => setExecResults([]), 200)}
+            placeholder="Н-р: Даниил, Субподряд" />
+          {execResults.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+              background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 8, overflow: "hidden", marginTop: 2,
+            }}>
+              {execResults.map(u => (
+                <div key={u.id}
+                  onMouseDown={() => selectExecUser(u)}
+                  style={{
+                    padding: "8px 12px", cursor: "pointer", fontSize: 12,
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    display: "flex", alignItems: "center", gap: 8,
+                  }}
+                  onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.10)"}
+                  onMouseOut={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                  {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
+                  <Send size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
+                </div>
+              ))}
+            </div>
+          )}
+          {f.executorUserId && (
+            <div style={{ fontSize: 10, color: "#6ee7a8", marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
+              <Send size={9} strokeWidth={2.4} /> Уведомление в Telegram будет отправлено
+            </div>
+          )}
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div>
@@ -2106,6 +2158,17 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       if (form.visibility === "selected" && saved?.id) {
         const userIds = (form.visibilityUsers || []).map(u => u.id).filter(Boolean);
         await setProjectVisibilityUsers(client, saved.id, userIds);
+      }
+      // v2.0: уведомление исполнителю если он выбран из системы
+      if (form.executorUserId) {
+        const prevExecutorId = modal !== "add" ? modal?.executorUserId : null;
+        if (form.executorUserId !== prevExecutorId) {
+          sendTelegramNotify(client, "team_invite", form.executorUserId, {
+            projectName: saved?.name || form.name,
+            actorName: profile?.name || profile?.email,
+            customText: "Тебя назначили исполнителем проекта",
+          });
+        }
       }
       setModal(null);
     } catch (e) {
