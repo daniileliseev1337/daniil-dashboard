@@ -1,75 +1,75 @@
 @echo off
-chcp 65001 > nul
 setlocal
 
 REM ===========================================================================
-REM Установка apartment-tracker. Запусти двойным кликом ОДИН РАЗ.
-REM Требует установленного Python 3.10+ (https://www.python.org/downloads/).
+REM Install apartment-tracker. Double-click to run ONCE.
+REM Requires Python 3.10+ (https://www.python.org/downloads/).
 REM ===========================================================================
 
 cd /d "%~dp0"
 
-echo === Проверяю Python ===
-where python >nul 2>&1
+echo === Checking Python ===
+REM Use py launcher (avoids Windows Store python.exe stub which shadows real Python in PATH).
+py -3 --version >nul 2>&1
 if errorlevel 1 (
     echo.
-    echo [!] Python не найден в PATH.
-    echo     Установи Python 3.10 или новее с https://www.python.org/downloads/
-    echo     При установке поставь галку "Add Python to PATH".
+    echo [!] Python launcher 'py' not found.
+    echo     Install Python 3.10 or newer from https://www.python.org/downloads/
+    echo     During install, CHECK "Add Python to PATH" AND "py launcher".
     echo.
     pause
     exit /b 1
 )
 
-echo === Создаю виртуальное окружение .venv ===
+echo === Creating venv .venv ===
 if not exist ".venv" (
-    python -m venv .venv
+    py -3 -m venv .venv
     if errorlevel 1 (
-        echo [!] Не получилось создать venv. Проверь права доступа к папке.
+        echo [!] Failed to create venv. Check folder permissions.
         pause
         exit /b 1
     )
 )
 
-echo === Обновляю pip ===
+echo === Upgrading pip ===
 ".venv\Scripts\python.exe" -m pip install --upgrade pip
 
-echo === Устанавливаю apartment-tracker и зависимости ===
+echo === Installing apartment-tracker and dependencies ===
 ".venv\Scripts\python.exe" -m pip install -e ".[dev]"
 if errorlevel 1 (
-    echo [!] Установка не прошла. Подробности выше.
+    echo [!] Install failed. See errors above.
     pause
     exit /b 1
 )
 
-echo === Готовлю config.yaml ===
+echo === Preparing config.yaml ===
 if not exist "config.yaml" (
     copy /Y "config_examples\config.example.yaml" "config.yaml" >nul
-    echo [+] Создан config.yaml (отредактируй веса скоринга под себя).
+    echo [+] config.yaml created. Edit scoring weights to your taste.
 ) else (
-    echo [=] config.yaml уже есть, не трогаю.
+    echo [=] config.yaml already exists, leaving it.
 )
 
-echo === Готовлю .env ===
+echo === Preparing .env ===
 if not exist ".env" (
     copy /Y "config_examples\.env.example" ".env" >nul
-    echo [+] Создан .env. ОТКРОЙ ЕГО и впиши TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
+    echo [+] .env created. OPEN IT and fill in TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
 ) else (
-    echo [=] .env уже есть, не трогаю.
+    echo [=] .env already exists, leaving it.
 )
 
-echo === Инициализирую базу данных ===
+echo === Initializing database ===
 ".venv\Scripts\apartment-tracker.exe" init
 
 echo.
 echo =========================================================================
-echo Готово.
+echo Done.
 echo.
-echo Дальше:
-echo   1) Создай бота: напиши @BotFather в Telegram, команда /newbot. Скопируй токен.
-echo   2) Узнай свой chat_id: напиши боту @userinfobot — он пришлёт твой ID.
-echo   3) Открой файл .env, впиши TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID.
-echo   4) (опц.) Отредактируй config.yaml — веса скоринга под себя.
-echo   5) Запусти бота двойным кликом на run.bat.
+echo Next steps:
+echo   1) Create a bot: message @BotFather in Telegram, command /newbot. Copy the token.
+echo   2) Get your chat_id: message @userinfobot - it will reply with your ID.
+echo   3) Open .env, fill in TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+echo   4) (optional) Edit config.yaml - scoring weights.
+echo   5) Run the bot: double-click run.bat.
 echo =========================================================================
 pause
