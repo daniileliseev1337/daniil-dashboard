@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
+import TradingSection from "./trading/TradingSection";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -28,37 +29,8 @@ import {
 // ════════════════════════════════════════════════════════════════════════════
 // SUPABASE: ПОДКЛЮЧЕНИЕ
 // ════════════════════════════════════════════════════════════════════════════
-// В обычном веб-приложении (в отличие от артефактов Claude) библиотека
-// Supabase подключается как стандартный npm-пакет — мы импортируем функцию
-// createClient вверху файла, и сразу создаём один клиент на всё приложение.
-// Никаких CDN-загрузок, никаких сетевых ограничений песочницы.
-//
-// Адрес проекта и ключ берутся из переменных окружения. Они задаются
-// один раз на стороне Vercel в разделе Environment Variables, и Vite
-// автоматически подставляет их в код во время сборки.
-// ----------------------------------------------------------------------------
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  // Если переменные не заданы — не имеет смысла пытаться запустить
-  // приложение. Лучше сразу бросить понятную ошибку, чем разбираться
-  // с непонятными "Load failed" в работе.
-  throw new Error(
-    "Не заданы переменные окружения VITE_SUPABASE_URL и VITE_SUPABASE_KEY. " +
-    "Проверь файл .env (локально) или Environment Variables на Vercel."
-  );
-}
-
-// Один клиент на всё приложение (singleton). Supabase сам кеширует токен
-// авторизации в localStorage и автоматически продлевает его перед истечением.
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-  },
-});
+// Singleton client вынесен в src/lib/supabase.js — общий между admin v1.5
+// и trading-модулями (src/trading/). Здесь только импорт.
 
 // ════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — справочники проекта
@@ -6010,12 +5982,14 @@ export default function App() {
   );
 
   // phase === "ready"
+  const canTrade = profile?.role === "admin" || profile?.role === "trading_admin";
   const TABS = [
     { id: "dashboard", label: "Дашборд",   Icon: LayoutDashboard },
     { id: "projects",  label: "Проекты",   Icon: FolderKanban },
     { id: "clients",   label: "Заказчики", Icon: BookUser },
     { id: "finance",   label: "Финансы",   Icon: Receipt },
     { id: "analytics", label: "Аналитика", Icon: BarChart3 },
+    ...(canTrade ? [{ id: "trading", label: "Trading", Icon: TrendingUp }] : []),
     ...(profile?.role === "admin" ? [{ id: "admin", label: "Admin", Icon: ShieldCheck }] : []),
   ];
 
@@ -6265,6 +6239,7 @@ export default function App() {
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
+            {tab === "trading" && canTrade && <TradingSection />}
             {tab === "admin" && profile?.role === "admin" && <AdminPage profile={profile} client={supabase} showToast={showToast} />}
           </motion.div>
         </AnimatePresence>
