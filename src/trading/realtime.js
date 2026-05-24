@@ -21,6 +21,24 @@ export function subscribeToSignals(onChange) {
 }
 
 /**
+ * Подписка на INSERT/UPDATE trading_positions -- для онлайн P&L.
+ * Срабатывает каждый раз когда portfolio_tracker (60 сек) обновляет позицию.
+ */
+export function subscribeToPositions(onChange) {
+  const channel = supabase
+    .channel("trading_positions_changes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "trading_positions" },
+      (payload) => onChange(payload),
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/**
  * Подписка на UPDATE trading_system_state (kill_switch / sandbox toggle).
  */
 export function subscribeToSystemState(onChange) {

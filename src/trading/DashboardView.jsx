@@ -1,37 +1,56 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Wallet, ShieldAlert, Bell, TrendingUp, TrendingDown, Loader2 } from "lucide-react";
+import {
+  Wallet,
+  ShieldAlert,
+  Bell,
+  TrendingUp,
+  TrendingDown,
+  Loader2,
+} from "lucide-react";
 import {
   fetchSystemState,
   fetchPositions,
   fetchRecentSignals,
+  fetchPnlSummary,
   updateSystemState,
 } from "./api";
-import { subscribeToSystemState, subscribeToSignals } from "./realtime";
+import {
+  subscribeToSystemState,
+  subscribeToSignals,
+  subscribeToPositions,
+} from "./realtime";
 
 export default function DashboardView() {
   const [state, setState] = useState(null);
   const [positions, setPositions] = useState([]);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pnl, setPnl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, pos, pending] = await Promise.all([
+      const [s, pos, pending, summary] = await Promise.all([
         fetchSystemState(),
         fetchPositions(),
         fetchRecentSignals({ limit: 100, statusIn: ["pending_confirm"] }),
+        fetchPnlSummary(),
       ]);
       setState(s);
       setPositions(pos);
       setPendingCount(pending.length);
+      setPnl(summary);
     } catch (e) {
       console.error("Dashboard load error:", e);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const refreshPnl = useCallback(() => {
+    fetchPnlSummary().then(setPnl).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -44,11 +63,17 @@ export default function DashboardView() {
     const unsubState = subscribeToSystemState((payload) => {
       setState(payload.new);
     });
+    const unsubPos = subscribeToPositions(() => {
+      // позиция обновилась -> пересчитать P&L и положения
+      fetchPositions().then(setPositions).catch(console.error);
+      refreshPnl();
+    });
     return () => {
       unsubSig();
       unsubState();
+      unsubPos();
     };
-  }, [reload]);
+  }, [reload, refreshPnl]);
 
   const toggleKillSwitch = async () => {
     if (!state) return;
@@ -80,6 +105,9 @@ export default function DashboardView() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* P&L summary -- сводка по доходам, обновляется Realtime через trading_positions */}
+      <PnlSummary pnl={pnl} />
+
       {/* Status row */}
       <div
         style={{
@@ -258,6 +286,110 @@ export default function DashboardView() {
           </div>
         )}
       </motion.div>
+    </div>
+  );
+}
+
+function PnlSummary({ pnl }) {
+  if (!pnl) return null;
+  const total = pnl.total_pnl;
+  const isPlus = total >= 0;
+  const accent = isPlus ? "#6ee7a8" : "#ef9a9a";
+  const sign = isPlus ? "+" : "−";
+  const fmt = (n) =>
+    Math.abs(n).toLocaleString("ru-RU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  return (
+    <div
+      style={{
+        background: "linear-gradient(135deg, rgba(212,175,55,0.04), rgba(212,175,55,0.01))",
+        border: "1px solid rgba(212,175,55,0.15)",
+        borderRadius: 14,
+        padding: "18px 20px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 14,
+      }}
+    >
+      <div>
+        <div
+          style={{
+            fontSize: 11,
+            color: "#a8a8a3",
+            textTransform: "uppercase",
+            letterSpacing: "0.08em",
+            marginBottom: 4,
+          }}
+        >
+          Общий P&L (sandbox)
+        </div>
+        <div
+          style={{
+            fontSize: 28,
+            fontWeight: 700,
+            color: accent,
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            letterSpacing: "-0.02em",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {isPlus ? <TrendingUp size={22} /> : <TrendingDown size={22} />}
+          {sign}{fmt(total)} ₽
+        </div>
+      </div>
+      <div
+        style={{
+          display: "flex",
+          gap: 22,
+          flexWrap: "wrap",
+        }}
+      >
+        <PnlBreakdownItem label="Реализованный" value={pnl.total_realized} fmt={fmt} />
+        <PnlBreakdownItem label="Бумажный" value={pnl.total_unrealized} fmt={fmt} />
+        <PnlBreakdownItem
+          label="Сделок сегодня"
+          value={pnl.today_trades}
+          fmt={(n) => String(Math.trunc(n))}
+          neutral
+        />
+      </div>
+    </div>
+  );
+}
+
+function PnlBreakdownItem({ label, value, fmt, neutral = false }) {
+  const isPlus = value >= 0;
+  const color = neutral ? "#e6e6e6" : isPlus ? "#6ee7a8" : "#ef9a9a";
+  const prefix = neutral ? "" : isPlus ? "+" : "−";
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 10,
+          color: "#6b6b67",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          marginBottom: 2,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color,
+          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        }}
+      >
+        {prefix}{fmt(value)}{neutral ? "" : " ₽"}
+      </div>
     </div>
   );
 }
