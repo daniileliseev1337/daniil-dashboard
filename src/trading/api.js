@@ -105,6 +105,42 @@ export async function fetchInstrumentsMap() {
   return map;
 }
 
+// ───────── P&L summary ─────────
+
+/**
+ * Сводка по доходам:
+ *   total_pnl        = sum(realized) + sum(unrealized) по всем позициям
+ *   total_realized   = sum(realized_pnl) -- закрытые лоты с момента открытия
+ *   total_unrealized = sum(unrealized_pnl) -- бумажный по открытым позициям
+ *   today_trades     = кол-во executed-сигналов за сегодня (UTC start of day)
+ */
+export async function fetchPnlSummary() {
+  const todayIsoStart = new Date().toISOString().slice(0, 10) + "T00:00:00Z";
+  const [posRes, tradesRes] = await Promise.all([
+    supabase.from("trading_positions").select("realized_pnl, unrealized_pnl"),
+    supabase
+      .from("trading_audit_log")
+      .select("id", { count: "exact", head: true })
+      .eq("action", "signal.executed")
+      .gte("ts", todayIsoStart),
+  ]);
+  if (posRes.error) throw posRes.error;
+  if (tradesRes.error) throw tradesRes.error;
+  const rows = posRes.data || [];
+  let realized = 0;
+  let unrealized = 0;
+  for (const r of rows) {
+    realized += parseFloat(r.realized_pnl || 0);
+    unrealized += parseFloat(r.unrealized_pnl || 0);
+  }
+  return {
+    total_realized: realized,
+    total_unrealized: unrealized,
+    total_pnl: realized + unrealized,
+    today_trades: tradesRes.count || 0,
+  };
+}
+
 // ───────── Audit log ─────────
 
 export async function fetchRecentAudit({ limit = 30 } = {}) {
