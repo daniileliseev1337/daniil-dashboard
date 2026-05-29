@@ -1,0 +1,14 @@
+# Веб-фронт daniil-dashboard (этап 6.1 — страница-заглушка).
+# На этапе 6.2 каталог ./web заменится на собранный React (vite build → dist).
+#
+# Порт публикуется ТОЛЬКО на localhost — наружу трафик идёт исключительно
+# через cloudflared (туннель), прямого доступа из сети нет.
+services:
+  web:
+    image: nginx:alpine
+    container_name: daniil-web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
