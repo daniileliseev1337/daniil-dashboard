@@ -1,5 +1,8 @@
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS notif_task boolean NOT NULL DEFAULT true;
 
+-- убрать старую 4-параметровую перегрузку, чтобы не было двусмысленности RPC
+DROP FUNCTION IF EXISTS public.update_notification_settings(boolean, boolean, boolean, boolean);
+
 CREATE OR REPLACE FUNCTION public.update_notification_settings(
   p_project_taken boolean,
   p_team_invite   boolean,
