@@ -1214,7 +1214,7 @@ function AuthScreen({ onAuthenticated, onError }) {
             opacity: 0.6,
             marginBottom: 6,
           }}>
-            Проектирование ОВ и К
+            Проектирование систем ОВиК<br/>Нам важно чем вы дышите.
           </div>
           <div style={{
             fontSize: 11,
@@ -6373,7 +6373,7 @@ export default function App() {
             fontWeight: 500,
             opacity: 0.6,
             marginTop: 2,
-          }}>Проектирование ОВ и К</div>
+          }}>Проектирование систем ОВиК<br/>Нам важно чем вы дышите.</div>
         </div>
 
         {/* Правая часть: кнопки действий и информация о пользователе */}
