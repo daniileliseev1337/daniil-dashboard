@@ -143,6 +143,33 @@ function projectJsToDb(p, ownerId) {
   };
 }
 
+// ── v3.0 6.4a: задачи ──
+function taskDbToJs(r) {
+  return {
+    id: r.id, projectId: r.project_id, projectName: r.project_name ?? null,
+    authorId: r.author_id, authorName: r.author_name ?? null,
+    assignedTo: r.assigned_to, assigneeName: r.assignee_name ?? null,
+    title: r.title, description: r.description ?? "",
+    status: r.status, priority: r.priority,
+    dueDate: r.due_date, sortOrder: r.sort_order ?? 0,
+    createdAt: r.created_at, updatedAt: r.updated_at,
+  };
+}
+function taskJsToDb(t) {
+  const o = {};
+  if (t.projectId !== undefined) o.project_id = t.projectId || null;
+  if (t.assignedTo !== undefined) o.assigned_to = t.assignedTo || null;
+  if (t.title !== undefined) o.title = t.title;
+  if (t.description !== undefined) o.description = t.description;
+  if (t.status !== undefined) o.status = t.status;
+  if (t.priority !== undefined) o.priority = t.priority;
+  if (t.dueDate !== undefined) o.due_date = t.dueDate || null;
+  if (t.sortOrder !== undefined) o.sort_order = t.sortOrder;
+  return o;
+}
+export const TASK_STATUSES = ["Новая", "В работе", "На проверке", "Готово", "Отменена"];
+export const TASK_PRIORITIES = ["Низкий", "Обычный", "Высокий"];
+
 // ────────────────────────────────────────────────────────────────────────
 // Маппинг записей клиентской базы (v1.5)
 // ────────────────────────────────────────────────────────────────────────
@@ -570,6 +597,34 @@ async function sendTelegramNotify(client, type, recipientId, data = {}) {
   } catch (e) {
     console.warn("Telegram notify failed:", e);
   }
+}
+
+// ── v3.0 6.4a: задачи — API-функции ──
+async function fetchTasks(client, { projectId = null, status = null, assignedTo = null } = {}) {
+  const { data, error } = await client.rpc("get_tasks", {
+    p_project_id: projectId, p_status: status, p_assigned_to: assignedTo,
+  });
+  if (error) throw error;
+  return (data || []).map(taskDbToJs);
+}
+async function createTask(client, t, authorId) {
+  const row = { ...taskJsToDb(t), author_id: authorId };
+  const { data, error } = await client.from("project_tasks").insert(row).select("id").single();
+  if (error) throw error;
+  return data.id;
+}
+async function updateTask(client, id, patch) {
+  const { error } = await client.from("project_tasks").update(taskJsToDb(patch)).eq("id", id);
+  if (error) throw error;
+}
+async function deleteTask(client, id) {
+  const { error } = await client.from("project_tasks").delete().eq("id", id);
+  if (error) throw error;
+}
+async function notifyTask(client, type, taskId, initiatorId) {
+  try {
+    await client.functions.invoke("telegram-notify", { body: { type, taskId, initiatorId } });
+  } catch (e) { console.warn("task notify failed:", e); }
 }
 
 // ── v3.0: Nextcloud — функции файлового хранилища ────────────────────────
