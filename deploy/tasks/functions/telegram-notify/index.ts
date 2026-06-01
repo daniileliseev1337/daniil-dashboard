@@ -37,11 +37,14 @@ function rest(path: string): Promise<Response> {
 }
 
 async function sendTo(chatId: string, text: string): Promise<void> {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-  });
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
+    });
+    if (!r.ok) console.warn("telegram sendMessage failed", r.status, await r.text());
+  } catch (e) { console.warn("telegram sendMessage error", String(e)); }
 }
 
 async function recipients(
@@ -66,7 +69,9 @@ Deno.serve(async (req: Request) => {
     if (type === "task_assigned" || type === "task_status" || type === "task_created") {
       const taskId = body.taskId as string | undefined;
       const initiator = body.initiatorId as string | undefined;
-      if (!taskId) return j({ error: "taskId required" }, 400);
+      if (!taskId || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(taskId)) {
+        return j({ error: "valid taskId (uuid) required" }, 400);
+      }
       const tr = await rest(
         `project_tasks?id=eq.${taskId}&select=title,project_id,author_id,assigned_to,status`,
       );
