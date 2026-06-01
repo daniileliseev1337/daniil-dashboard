@@ -100,7 +100,23 @@ journalctl -u frpc -n 50
 Сборка: `npm run build` на Windows (node_modules — Windows-нативные). Скрипт чистит
 **содержимое** каталога, не пересоздаёт его (каталог — источник bind-mount nginx).
 
-## Дальше (этап 6.4)
+## Слой задач (этап 6.4a — MVP)
 
-Слой задач (таск-панель) как самостоятельная сущность над проектами (раздел 4.2 ТЗ).
-Этапы 6.1 (инфра), 6.2 (миграция БД), 6.3 (Nextcloud) — завершены.
+- БД: таблица `public.project_tasks` (миграции `supabase/migrations/20260601_0001..0004`),
+  RLS на готовых хелперах прав (от проекта; без проекта — личная), RPC
+  `get_tasks(p_project_id,p_status,p_assigned_to)` (SECURITY DEFINER, дублирует предикат
+  доступа, отдаёт имена проекта/автора/исполнителя). Колонка `profiles.notif_task`.
+- Realtime: `project_tasks` уже в публикации `supabase_realtime` (живая подписка — в 6.4b,
+  без новой миграции).
+- Фронт (`src/App.jsx`): вкладка «Задачи» (список+фильтры, доска с нативным drag-drop),
+  модалка задачи, секция «Задачи проекта» в карточке проекта, флаг `notif_task` в настройках.
+  Мутации — `.from('project_tasks')` под RLS; список — `get_tasks`; обновление refetch.
+- Telegram: Edge Function `telegram-notify` (типы `task_assigned/task_status/task_created`,
+  резолв адресатов под service_role, фильтр `notif_task`). **Требует `TELEGRAM_BOT_TOKEN`
+  в окружении edge-runtime — пока не задан, доставка не идёт** (см. долги).
+- Применение/проверки: `deploy/tasks/apply-migrations.sh`, `deploy/tasks/verify-rls.sh`.
+
+## Дальше (этап 6.4b)
+
+Версионирование «ТЗ задачи» + diff-просмотр + апрув-механика; живая Realtime-подписка
+на фронте; напоминания о дедлайне задач (cron). Этапы 6.1–6.3 и 6.4a — завершены.
