@@ -13,13 +13,14 @@
 // SUPABASE_URL=http://kong:8000. Получатели фильтруются: notif_task=true,
 // есть telegram_chat_id, и из списка исключается инициатор действия.
 //
-// ВНИМАНИЕ: TELEGRAM_BOT_TOKEN на момент написания НЕ задан в окружении
-// edge-runtime (см. docker-compose.yml -> functions.environment). Без него
-// реальная отправка работать не будет — добавить переменную перед использованием.
+// Токен бота — в config.json рядом с этим файлом (на сервере, в
+// volumes/functions/telegram-notify/config.json; НЕ в git), как у функции nextcloud.
+
+import cfg from "./config.json" with { type: "json" };           // токен бота (на сервере, НЕ в git)
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;              // http://kong:8000
 const SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const BOT_TOKEN    = Deno.env.get("TELEGRAM_BOT_TOKEN")!;        // задаётся в env edge-runtime
+const BOT_TOKEN    = cfg.botToken;                               // из config.json рядом с функцией
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
