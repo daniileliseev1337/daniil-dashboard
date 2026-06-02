@@ -1,5 +1,4 @@
 // Единый Supabase client для всего приложения.
-// Используется как App.jsx (admin v1.5), так и новыми trading-модулями.
 import { createClient } from "@supabase/supabase-js";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;

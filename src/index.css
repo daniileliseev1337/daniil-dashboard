@@ -162,15 +162,6 @@ input, textarea, select, button {
   50% { box-shadow: 0 0 0 8px rgba(212, 175, 55, 0); }
 }
 
-/* Спиннер для trading-views (Loader2 из lucide-react). */
-@keyframes trading-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-.trading-spin {
-  animation: trading-spin 0.9s linear infinite;
-}
-
 /*
   Скелетный загрузчик — серая «пустая» карточка, которая показывается
   пока реальные данные ещё не пришли с сервера. Имеет анимацию

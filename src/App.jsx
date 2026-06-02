@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
-import TradingSection from "./trading/TradingSection";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -47,8 +46,8 @@ function useIsMobile(){
 // ════════════════════════════════════════════════════════════════════════════
 // SUPABASE: ПОДКЛЮЧЕНИЕ
 // ════════════════════════════════════════════════════════════════════════════
-// Singleton client вынесен в src/lib/supabase.js — общий между admin v1.5
-// и trading-модулями (src/trading/). Здесь только импорт.
+// Singleton client вынесен в src/lib/supabase.js — общий для всего приложения.
+// Здесь только импорт.
 
 // ════════════════════════════════════════════════════════════════════════════
 // CONSTANTS — справочники проекта
@@ -6329,7 +6328,6 @@ export default function App() {
   );
 
   // phase === "ready"
-  const canTrade = profile?.role === "admin" || profile?.role === "trading_admin";
   const TABS = [
     { id: "dashboard", label: "Дашборд",   Icon: LayoutDashboard },
     { id: "projects",  label: "Проекты",   Icon: FolderKanban },
@@ -6337,7 +6335,6 @@ export default function App() {
     { id: "clients",   label: "Заказчики", Icon: BookUser },
     { id: "finance",   label: "Финансы",   Icon: Receipt },
     { id: "analytics", label: "Аналитика", Icon: BarChart3 },
-    ...(canTrade ? [{ id: "trading", label: "Trading", Icon: TrendingUp }] : []),
     ...(profile?.role === "admin" ? [{ id: "admin", label: "Admin", Icon: ShieldCheck }] : []),
   ];
 
@@ -6595,7 +6592,6 @@ export default function App() {
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
-            {tab === "trading" && canTrade && <TradingSection />}
             {tab === "admin" && profile?.role === "admin" && <AdminPage profile={profile} client={supabase} showToast={showToast} />}
           </motion.div>
         </AnimatePresence>
