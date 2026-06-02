@@ -191,6 +191,26 @@ const TASK_STATUS_BADGE = {
   "Готово": "bg-emerald-600", "Отменена": "bg-zinc-800",
 };
 
+// ── v3.0 6.4b: версии ТЗ и комментарии задач ──
+function versionDbToJs(r) {
+  return {
+    id: r.id, taskId: r.task_id, versionNo: r.version_no,
+    content: r.content ?? "", status: r.status,
+    proposedBy: r.proposed_by, proposedByName: r.proposed_by_name ?? "Пользователь",
+    resolvedBy: r.resolved_by ?? null, resolvedByName: r.resolved_by_name ?? null,
+    createdAt: r.created_at, resolvedAt: r.resolved_at ?? null,
+  };
+}
+function commentDbToJs(r) {
+  return {
+    id: r.id, taskId: r.task_id,
+    authorId: r.author_id, authorName: r.author_name ?? "Пользователь",
+    body: r.body ?? "", isQuestion: !!r.is_question, resolved: !!r.resolved,
+    resolvedBy: r.resolved_by ?? null, resolvedByName: r.resolved_by_name ?? null,
+    resolvedAt: r.resolved_at ?? null, createdAt: r.created_at,
+  };
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Маппинг записей клиентской базы (v1.5)
 // ────────────────────────────────────────────────────────────────────────
@@ -647,6 +667,52 @@ async function notifyTask(client, type, taskId, initiatorId) {
   try {
     await client.functions.invoke("telegram-notify", { body: { type, taskId, initiatorId } });
   } catch (e) { console.warn("task notify failed:", e); }
+}
+
+// ── v3.0 6.4b: версии ТЗ — API-обёртки (RPC Плана 1) ──
+async function fetchTaskVersions(client, taskId) {
+  const { data, error } = await client.rpc("get_task_versions", { p_task_id: taskId });
+  if (error) throw error;
+  return (data || []).map(versionDbToJs);
+}
+async function proposeTzVersion(client, taskId, content) {
+  const { data, error } = await client.rpc("propose_tz_version", { p_task_id: taskId, p_content: content });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+async function approveTzVersion(client, versionId) {
+  const { data, error } = await client.rpc("approve_tz_version", { p_version_id: versionId });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+async function rejectTzVersion(client, versionId) {
+  const { data, error } = await client.rpc("reject_tz_version", { p_version_id: versionId });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+
+// ── v3.0 6.4b: обсуждение задачи + смена статуса ──
+async function fetchTaskComments(client, taskId) {
+  const { data, error } = await client.rpc("get_task_comments", { p_task_id: taskId });
+  if (error) throw error;
+  return (data || []).map(commentDbToJs);
+}
+async function insertTaskComment(client, taskId, body, isQuestion) {
+  const uid = (await client.auth.getUser()).data.user.id;
+  const { error } = await client.from("task_comments").insert({
+    task_id: taskId, author_id: uid, body, is_question: !!isQuestion,
+  });
+  if (error) throw error;
+}
+async function resolveTaskQuestion(client, commentId, resolved) {
+  const { data, error } = await client.rpc("resolve_question", { p_comment_id: commentId, p_resolved: !!resolved });
+  if (error) throw error;
+  return commentDbToJs(data);
+}
+async function setTaskStatus(client, taskId, status) {
+  const { data, error } = await client.rpc("set_task_status", { p_task_id: taskId, p_status: status });
+  if (error) throw error;
+  return taskDbToJs(data);
 }
 
 // ── v3.0: Nextcloud — функции файлового хранилища ────────────────────────
