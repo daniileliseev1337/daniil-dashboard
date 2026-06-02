@@ -29,6 +29,22 @@ import {
 } from "recharts";
 
 // ════════════════════════════════════════════════════════════════════════════
+// HOOKS — общие утилиты
+// ════════════════════════════════════════════════════════════════════════════
+// useIsMobile — реактивный детект мобильной ширины (≤640px) для случаев,
+// где CSS-значений (auto-fit / clamp / min) недостаточно и нужна иная раскладка.
+function useIsMobile(){
+  const [m,setM]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:640px)').matches);
+  useEffect(()=>{
+    const mq=window.matchMedia('(max-width:640px)');
+    const h=e=>setM(e.matches);
+    mq.addEventListener('change',h);
+    return()=>mq.removeEventListener('change',h);
+  },[]);
+  return m;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // SUPABASE: ПОДКЛЮЧЕНИЕ
 // ════════════════════════════════════════════════════════════════════════════
 // Singleton client вынесен в src/lib/supabase.js — общий между admin v1.5
@@ -1001,7 +1017,7 @@ function Modal({ title, onClose, children, maxWidth = 480, icon }) {
             border: "1px solid rgba(255,255,255,0.10)",
             borderRadius: 18,
             width: "100%",
-            maxWidth,
+            maxWidth: `min(100vw - 32px, ${maxWidth}px)`,
             maxHeight: "90vh",
             overflowY: "auto",
             boxShadow: "0 24px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04)",
@@ -2020,7 +2036,7 @@ function Dashboard({ projects, txs }) {
       animate="visible"
     >
       {/* Главные KPI — четыре стеклянные карточки */}
-      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
         <KpiCard
           label="Активных проектов"
           value={active.length}
@@ -2055,7 +2071,7 @@ function Dashboard({ projects, txs }) {
       </motion.div>
 
       {/* Два графика рядом */}
-      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
         <Card>
           <SectionTitle icon={<BarChart3 size={13} />}>Проекты по стадиям</SectionTitle>
           {stageData.length > 0
@@ -2093,7 +2109,7 @@ function Dashboard({ projects, txs }) {
       </motion.div>
 
       {/* Дедлайны: просроченные и предстоящие */}
-      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <motion.div variants={itemVariants} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
         <Card>
           <SectionTitle icon={<AlertTriangle size={13} />}>Просроченные дедлайны</SectionTitle>
           {overdue.length === 0
@@ -2136,7 +2152,7 @@ function Dashboard({ projects, txs }) {
       <motion.div variants={itemVariants}>
         <Card>
           <SectionTitle icon={<Wallet size={13} />}>Финансы текущего месяца</SectionTitle>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 16 }}>
             {[
               { label: "Доходы", val: mIncome, color: "#e8c860" },
               { label: "Расходы", val: mExpense, color: "#f8a3a3" },
@@ -3018,7 +3034,7 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
                value={form.title} onChange={e => set("title", e.target.value)} />
         <textarea className="w-full bg-zinc-800 rounded px-3 py-2 mb-2" rows={4} placeholder="Описание (ТЗ)"
                value={form.description} onChange={e => set("description", e.target.value)} />
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.projectId} onChange={e => set("projectId", e.target.value)}>
             <option value="">Без проекта (личная)</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -3132,8 +3148,8 @@ function TasksView({ client, profile, projects, showToast }) {
       </div>
       {loading ? <div className="opacity-60">Загрузка…</div> :
        view === "board" ? <TasksBoard tasks={tasks} onOpen={setEditing} onReload={reload} client={client} profile={profile} badge={badge} showToast={showToast} /> :
-       <div className="overflow-x-auto">
-         <table className="w-full text-sm">
+       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
+         <table className="w-full text-sm" style={{ minWidth: 560 }}>
            <thead><tr className="text-left opacity-60">
              <th>Статус</th><th>Задача</th><th>Проект</th><th>Исполнитель</th><th>Приоритет</th><th>Срок</th>
            </tr></thead>
@@ -3334,7 +3350,8 @@ function CsvImportModal({ onClose, onImport }) {
                 }}>✂ Очистить все названия</button>
             </div>
 
-            <div style={{border:"1px solid #141414",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:16}}>
+            <div style={{border:"1px solid #141414",borderRadius:12,overflow:"hidden",minWidth:440}}>
               <div style={{
                 display:"grid",gridTemplateColumns:"90px 1fr 130px 90px 32px",gap:8,
                 padding:"8px 12px",background:"#131d2e",
@@ -3409,6 +3426,7 @@ function CsvImportModal({ onClose, onImport }) {
                   </div>
                 ))}
               </div>
+            </div>
             </div>
 
             <div style={{display:"flex",gap:10}}>
@@ -4786,6 +4804,7 @@ function ClientForm({ initial, onSave, onClose, saving }) {
 // CLIENTS PAGE — вкладка "Заказчики" (v1.5)
 // ════════════════════════════════════════════════════════════════════════════
 function ClientsPage({ clients, setClients, projects, client, ownerId, showToast }) {
+  const isMobile = useIsMobile();
   const [modal, setModal] = useState(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("all");
@@ -4849,7 +4868,7 @@ function ClientsPage({ clients, setClients, projects, client, ownerId, showToast
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, alignItems: "center" }}>
-        <div style={{ position: "relative", flex: 1, minWidth: 200, maxWidth: 360 }}>
+        <div style={{ position: "relative", flex: 1, minWidth: isMobile ? 0 : 200, maxWidth: 360 }}>
           <Search size={14} strokeWidth={2.2} style={{
             position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
             color: "#6b6b67", pointerEvents: "none",
@@ -5999,8 +6018,8 @@ function ReportViewer({ projects, onClose }) {
           </div>
           {visible.length===0
             ? <div style={{textAlign:"center",padding:48,color:"#a8a8a3",fontSize:14}}>Нет проектов</div>
-            : <div style={{background:"white",borderRadius:14,border:"1px solid #fafaf7",overflow:"hidden",marginBottom:20}}>
-                <table style={{width:"100%",borderCollapse:"collapse"}}>
+            : <div style={{background:"white",borderRadius:14,border:"1px solid #fafaf7",overflowX:"auto",WebkitOverflowScrolling:"touch",marginBottom:20}}>
+                <table style={{width:"100%",borderCollapse:"collapse",minWidth:760}}>
                   <thead>
                     <tr style={{background:"#f8fafc"}}>
                       {["Проект / Клиент","Тип работ","Исполнитель","Стадия","По договору","Оплачено","Остаток","Дедлайн"].map((h,i)=>(
@@ -6100,6 +6119,7 @@ export default function App() {
   //   error    — критическая ошибка подключения
   const [phase, setPhase] = useState("loading");
   const [errorMsg, setErrorMsg] = useState("");
+  const isMobile = useIsMobile();
 
   const [user, setUser]       = useState(null);
   const [profile, setProfile] = useState(null);
@@ -6332,7 +6352,7 @@ export default function App() {
       {/* Шапка с логотипом, действиями и информацией о пользователе */}
       <div style={{
         borderBottom: "1px solid rgba(255,255,255,0.06)",
-        padding: "14px 24px",
+        padding: isMobile ? "12px 14px" : "14px 24px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -6377,8 +6397,8 @@ export default function App() {
         </div>
 
         {/* Правая часть: кнопки действий и информация о пользователе */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: isMobile ? "flex-start" : "flex-end", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
             {/* Кнопка отчёта — акцентная, в фирменном цвете */}
             <button
               onClick={() => setReportModal(true)}
@@ -6560,7 +6580,7 @@ export default function App() {
       </div>
 
       {/* Содержимое страницы — обёрнуто в AnimatePresence для плавных переходов */}
-      <div style={{ padding: 24, maxWidth: 1080, margin: "0 auto" }}>
+      <div style={{ padding: 'clamp(12px, 4vw, 24px)', maxWidth: 1080, margin: "0 auto" }}>
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
