@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
 import { motion, AnimatePresence } from "framer-motion";
@@ -1625,11 +1625,6 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
               ))}
             </div>
           )}
-          {f.executorUserId && (
-            <div style={{ fontSize: 10, color: "#6ee7a8", marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
-              <Send size={9} strokeWidth={2.4} /> Уведомление в Telegram будет отправлено
-            </div>
-          )}
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -3168,6 +3163,26 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
     })();
   }, [form.projectId, client]);
 
+  // 6.4a §5: источник исполнителей — участники проекта (get_project_members) + владелец;
+  // для личной задачи (без проекта) — сам автор. get_project_members не возвращает
+  // владельца (он в projects.owner_id, не в project_members), поэтому добавляем
+  // текущего пользователя как кандидата и дедуплицируем по id.
+  const assigneeOptions = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    const push = (id, name, email) => {
+      if (!id || seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name, email });
+    };
+    (members || []).forEach(m => push(m.user_id || m.id, m.name, m.email));
+    if (profile?.id) push(profile.id, profile.name, profile.email);
+    // уже назначенный исполнитель существующей задачи может не входить в members
+    // (напр. бывший участник) — добавляем, чтобы select отображал выбранное.
+    if (task.assignedTo) push(task.assignedTo, task.assigneeName, null);
+    return out;
+  }, [members, profile, task.assignedTo, task.assigneeName]);
+
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const save = async () => {
@@ -3313,7 +3328,7 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
           </select>
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.assignedTo} onChange={e => set("assignedTo", e.target.value)}>
             <option value="">Исполнитель: —</option>
-            {members.map(m => <option key={m.user_id || m.id} value={m.user_id || m.id}>{m.name || m.email}</option>)}
+            {assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name || m.email}</option>)}
           </select>
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.status} onChange={e => set("status", e.target.value)}>
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
