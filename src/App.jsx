@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
 import { motion, AnimatePresence } from "framer-motion";
@@ -3052,9 +3052,16 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
     status: task.status || "Новая", priority: task.priority || "Обычный",
     dueDate: task.dueDate || "",
   });
-  const [members, setMembers] = useState([]);
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
+
+  // 6.4b: исполнитель выбирается из всех одобренных пользователей через
+  // search_approved_users (единый источник с ProjectForm). assigneeName хранит
+  // отображаемое имя выбранного/назначенного — RPC исключает текущего юзера
+  // (id != auth.uid()), поэтому имя самого себя и уже назначенного держим локально.
+  const [assigneeName, setAssigneeName] = useState(task.assigneeName || "");
+  const [execQuery, setExecQuery] = useState("");
+  const [execResults, setExecResults] = useState([]);
 
   // ── 6.4b: версии ТЗ ──
   const [versions, setVersions] = useState([]);
@@ -3153,35 +3160,38 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
     catch (e) { showToast("Ошибка: " + (e.message || ""), "error"); }
   };
 
+  // 6.4b: autocomplete по одобренным пользователям (как в ProjectForm).
+  // search_approved_users исключает самого себя, поэтому текущего пользователя
+  // добавляем в результаты вручную, если он подходит под запрос.
   useEffect(() => {
-    (async () => {
-      if (!form.projectId) { setMembers([]); return; }
+    if (!client || !execQuery.trim()) { setExecResults([]); return; }
+    const t = setTimeout(async () => {
       try {
-        const m = await client.rpc("get_project_members", { p_project_id: form.projectId });
-        setMembers(m.data || []);
-      } catch { setMembers([]); }
-    })();
-  }, [form.projectId, client]);
+        const res = await searchApprovedUsers(client, execQuery);
+        const q = execQuery.trim().toLowerCase();
+        const selfMatches = profile?.id &&
+          ((profile.name || "").toLowerCase().includes(q) || (profile.email || "").toLowerCase().includes(q));
+        const out = (selfMatches && !res.some(u => u.id === profile.id))
+          ? [{ id: profile.id, name: profile.name, email: profile.email }, ...res]
+          : res;
+        setExecResults(out);
+      } catch { setExecResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [execQuery, client, profile]); // eslint-disable-line
 
-  // 6.4a §5: источник исполнителей — участники проекта (get_project_members) + владелец;
-  // для личной задачи (без проекта) — сам автор. get_project_members не возвращает
-  // владельца (он в projects.owner_id, не в project_members), поэтому добавляем
-  // текущего пользователя как кандидата и дедуплицируем по id.
-  const assigneeOptions = useMemo(() => {
-    const out = [];
-    const seen = new Set();
-    const push = (id, name, email) => {
-      if (!id || seen.has(id)) return;
-      seen.add(id);
-      out.push({ id, name, email });
-    };
-    (members || []).forEach(m => push(m.user_id || m.id, m.name, m.email));
-    if (profile?.id) push(profile.id, profile.name, profile.email);
-    // уже назначенный исполнитель существующей задачи может не входить в members
-    // (напр. бывший участник) — добавляем, чтобы select отображал выбранное.
-    if (task.assignedTo) push(task.assignedTo, task.assigneeName, null);
-    return out;
-  }, [members, profile, task.assignedTo, task.assigneeName]);
+  const selectAssignee = (user) => {
+    setForm(f => ({ ...f, assignedTo: user.id }));
+    setAssigneeName(user.name || user.email || "");
+    setExecQuery("");
+    setExecResults([]);
+  };
+  const clearAssignee = () => {
+    setForm(f => ({ ...f, assignedTo: "" }));
+    setAssigneeName("");
+    setExecQuery("");
+    setExecResults([]);
+  };
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -3326,10 +3336,31 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
             <option value="">Без проекта (личная)</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select className="bg-zinc-800 rounded px-2 py-2" value={form.assignedTo} onChange={e => set("assignedTo", e.target.value)}>
-            <option value="">Исполнитель: —</option>
-            {assigneeOptions.map(m => <option key={m.id} value={m.id}>{m.name || m.email}</option>)}
-          </select>
+          {form.assignedTo ? (
+            <div className="bg-zinc-800 rounded px-2 py-2 flex items-center gap-2">
+              <span className="text-xs opacity-60 shrink-0">Исполнитель:</span>
+              <span className="truncate flex-1">{assigneeName || "—"}</span>
+              <button type="button" onClick={clearAssignee}
+                className="text-zinc-400 hover:text-zinc-100 shrink-0" title="Сбросить исполнителя">×</button>
+            </div>
+          ) : (
+            <div style={{ position: "relative" }}>
+              <input className="w-full bg-zinc-800 rounded px-2 py-2" placeholder="Исполнитель: поиск по имени/почте"
+                value={execQuery} onChange={e => setExecQuery(e.target.value)}
+                onBlur={() => setTimeout(() => setExecResults([]), 200)} />
+              {execResults.length > 0 && (
+                <div className="absolute left-0 right-0 z-50 mt-1 bg-zinc-800 border border-white/10 rounded overflow-hidden">
+                  {execResults.map(u => (
+                    <div key={u.id} onMouseDown={() => selectAssignee(u)}
+                      className="px-3 py-2 cursor-pointer text-sm hover:bg-zinc-700 flex items-center gap-2">
+                      <span className="text-zinc-100">{u.name || u.email}</span>
+                      {u.name && <span className="text-zinc-500 text-xs truncate">{u.email}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.status} onChange={e => set("status", e.target.value)}>
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
