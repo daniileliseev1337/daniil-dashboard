@@ -13,7 +13,7 @@ import {
   Briefcase, Receipt, BadgeCheck, Loader2, Mail,
   Phone, Send, ExternalLink,
   // ── v1.5: иконки для админ-панели, команды, клиентов, прав ──
-  ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck,
+  ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck, KeyRound,
   Building2, MapPin, Hash, Star, Activity, ScrollText, BookUser,
   ChevronDown, IdCard, Phone as PhoneIcon,
   // ── v2.0: иконки маркетплейса, комментариев, файлов ──
@@ -576,6 +576,15 @@ async function adminSystemStats(client) {
   return data || {};
 }
 
+// Сброс пароля пользователя администратором (без SMTP). Защита — is_admin() внутри RPC.
+async function adminResetPassword(client, userId, newPassword) {
+  const { error } = await client.rpc("admin_reset_password", {
+    p_user_id: userId,
+    p_new_password: newPassword,
+  });
+  if (error) throw error;
+}
+
 async function adminFetchActivityLog(client, limit = 50) {
   const { data, error } = await client
     .from("activity_log")
@@ -735,20 +744,20 @@ async function fetchProjectFiles(client, projectId) {
 }
 
 async function uploadProjectFile(client, projectId, file, isPublic) {
-  // Читаем файл как base64
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result.split(",")[1]);
-    reader.onerror = () => reject(new Error("Ошибка чтения файла"));
-    reader.readAsDataURL(file);
+  // Бинарная загрузка: шлём сырой File (стримится), метаданные — в заголовках.
+  // НЕ читаем файл в base64 — иначе worker Edge Function упирается в memory limit.
+  const { data, error } = await client.functions.invoke("nextcloud", {
+    body: file,
+    headers: {
+      "x-action":     "upload",
+      "x-project-id": projectId,
+      "x-filename":   encodeURIComponent(file.name),
+      "x-mime-type":  file.type || "application/octet-stream",
+      "x-file-size":  String(file.size),
+    },
   });
-  return ncAction(client, "upload", {
-    projectId,
-    filename:   file.name,
-    mimeType:   file.type || "application/octet-stream",
-    isPublic,
-    fileBase64: base64,
-  });
+  if (error) throw error;
+  return data;
 }
 
 // Nextcloud внутренний — прямой ссылки нет: функция стримит файл, получаем Blob.
@@ -1231,7 +1240,7 @@ function AuthScreen({ onAuthenticated, onError }) {
         }
         onAuthenticated(user, profile);
       } else {
-        // Регистрация — Supabase отправит письмо для подтверждения
+        // Регистрация: autoconfirm включён (письма нет) — аккаунт создаётся и ждёт одобрения админом
         await signUpWithPassword(client, email.trim(), password);
         setMode("check_email");
       }
@@ -1305,7 +1314,7 @@ function AuthScreen({ onAuthenticated, onError }) {
             letterSpacing: "0.14em",
             fontWeight: 500,
           }}>
-            Рабочий центр · Проекты · Финансы
+            Искусство климата, инженерия комфорта
           </div>
         </div>
 
@@ -1323,7 +1332,7 @@ function AuthScreen({ onAuthenticated, onError }) {
                 margin: "0 auto 16px",
                 color: "#e8c860",
               }}>
-                <Mail size={28} strokeWidth={1.8} />
+                <Hourglass size={28} strokeWidth={1.8} />
               </div>
               <div style={{
                 fontSize: 17,
@@ -1332,12 +1341,11 @@ function AuthScreen({ onAuthenticated, onError }) {
                 marginBottom: 8,
                 letterSpacing: "-0.02em",
               }}>
-                Проверь почту
+                Заявка отправлена
               </div>
               <p style={{ fontSize: 13, color: "#9b9ca4", marginBottom: 20, lineHeight: 1.55 }}>
-                На <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> отправлено письмо
-                с ссылкой для подтверждения. Перейди по ней, потом возвращайся
-                и войди.
+                Аккаунт <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> создан
+                и ожидает одобрения администратором. После одобрения вы сможете войти.
               </p>
               <button
                 onClick={() => { setMode("signin"); setError(null); }}
@@ -1457,6 +1465,11 @@ function AuthScreen({ onAuthenticated, onError }) {
                   </>
                 )}
               </div>
+              {mode === "signin" && (
+                <div style={{ textAlign: "center", fontSize: 11, color: "#62646b", marginTop: 10 }}>
+                  Забыли пароль? Обратитесь к администратору
+                </div>
+              )}
             </>
           )}
         </div>
@@ -5770,6 +5783,9 @@ function AdminPage({ profile, client, showToast }) {
   const [search, setSearch] = useState("");
   const [confirmDel, setConfirmDel] = useState(null);
   const [confirmText, setConfirmText] = useState("");
+  const [resetUser, setResetUser] = useState(null);   // пользователь для сброса пароля
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetPwd2, setResetPwd2] = useState("");
 
   const reload = async () => {
     setLoading(true);
@@ -5820,6 +5836,19 @@ function AdminPage({ profile, client, showToast }) {
       setConfirmDel(null);
       setConfirmText("");
       reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const doResetPassword = async () => {
+    if (!resetUser) return;
+    if (resetPwd.length < 8) { showToast("Пароль минимум 8 символов", "error"); return; }
+    if (resetPwd !== resetPwd2) { showToast("Пароли не совпадают", "error"); return; }
+    try {
+      await adminResetPassword(client, resetUser.id, resetPwd);
+      showToast(`Пароль для ${resetUser.email} сброшен`);
+      setResetUser(null); setResetPwd(""); setResetPwd2("");
     } catch (e) {
       showToast("Ошибка: " + (e.message || ""), "error");
     }
@@ -5948,6 +5977,19 @@ function AdminPage({ profile, client, showToast }) {
                         }}
                       >
                         <ShieldCheck size={13} strokeWidth={2.2} />
+                      </button>
+                      <button
+                        onClick={() => { setResetUser(u); setResetPwd(""); setResetPwd2(""); }}
+                        title="Сбросить пароль"
+                        style={{
+                          padding: 6, borderRadius: 6, cursor: "pointer", border: "1px solid",
+                          background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.10)",
+                          color: "#a8a8a3", display: "flex",
+                        }}
+                        onMouseOver={e => { e.currentTarget.style.color = "#e8c860"; e.currentTarget.style.borderColor = "rgba(212,175,55,0.30)"; }}
+                        onMouseOut={e => { e.currentTarget.style.color = "#a8a8a3"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
+                      >
+                        <KeyRound size={13} strokeWidth={2.2} />
                       </button>
                       <button
                         onClick={() => { setConfirmDel(u.id); setConfirmText(""); }}
@@ -6091,6 +6133,49 @@ function AdminPage({ profile, client, showToast }) {
           </Modal>
         );
       })()}
+
+      {resetUser && (
+        <Modal
+          title="Сбросить пароль"
+          onClose={() => { setResetUser(null); setResetPwd(""); setResetPwd2(""); }}
+          icon={<KeyRound size={16} />}
+          maxWidth={420}
+        >
+          <p style={{ fontSize: 13, color: "#a8a8a3", lineHeight: 1.55, marginTop: 0 }}>
+            Новый пароль для <b style={{ color: "#fafaf7" }}>{resetUser.email}</b>.
+            Передайте его пользователю — войдя, он сможет сменить пароль сам.
+          </p>
+          <Field label="Новый пароль (минимум 8 символов)">
+            <StyledInput
+              type="password"
+              value={resetPwd}
+              onChange={e => setResetPwd(e.target.value)}
+              placeholder="Новый пароль"
+              autoFocus
+            />
+          </Field>
+          <Field label="Повторите пароль">
+            <StyledInput
+              type="password"
+              value={resetPwd2}
+              onChange={e => setResetPwd2(e.target.value)}
+              placeholder="Ещё раз"
+              onKeyDown={e => { if (e.key === "Enter") doResetPassword(); }}
+            />
+          </Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button onClick={() => { setResetUser(null); setResetPwd(""); setResetPwd2(""); }} className={BTN.ghost} style={{ flex: 1 }}>Отмена</button>
+            <button
+              onClick={doResetPassword}
+              disabled={resetPwd.length < 8 || resetPwd !== resetPwd2}
+              className={BTN.primary}
+              style={{ flex: 2, opacity: (resetPwd.length >= 8 && resetPwd === resetPwd2) ? 1 : 0.5 }}
+            >
+              Сбросить пароль
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -6814,7 +6899,7 @@ export default function App() {
               color: "#62646b",
               fontWeight: 400,
               fontSize: 13,
-            }}>· рабочий центр</span>
+            }}>· Искусство климата, инженерия комфорта</span>
           </h1>
           <div style={{
             fontSize: 11,

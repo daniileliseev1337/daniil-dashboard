@@ -8,6 +8,10 @@
 // техюзером приложения.
 //
 // Actions: upload | download | delete | toggle-public
+//   upload — БИНАРНЫЙ: тело запроса = сырые байты файла (стрим), метаданные в
+//            заголовках x-*. Тело НЕ буферизуется в памяти (стримится в WebDAV) —
+//            иначе worker упирается в memory limit на крупных файлах.
+//   остальные — JSON-тело { action, ... }.
 //
 // Креды Nextcloud — в config.json рядом с этим файлом (на сервере, не в git).
 // SUPABASE_URL / SUPABASE_ANON_KEY берутся из окружения edge-runtime.
@@ -21,7 +25,7 @@ const NC_AUTH = "Basic " + btoa(`${nc.user}:${nc.password}`);
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-action, x-project-id, x-filename, x-mime-type, x-file-size",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -77,21 +81,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const uid = getUserId(authHeader);
   if (!uid) return json({ error: "unauthorized" }, 401);
 
-  const body = await req.json().catch(() => ({} as Record<string, unknown>));
-  const action = body.action as string;
-
   try {
-    // ─── UPLOAD ───────────────────────────────────────────────────────────
-    if (action === "upload") {
-      const projectId = body.projectId as string;
-      const filename = body.filename as string;
-      const mimeType = (body.mimeType as string) || null;
-      const fileBase64 = body.fileBase64 as string;
-      if (!projectId || !filename || !fileBase64) {
-        return json({ error: "bad params (projectId, filename, fileBase64 required)" }, 400);
+    // ─── UPLOAD (бинарный стрим, метаданные в заголовках) ─────────────────────
+    if (req.headers.get("x-action") === "upload") {
+      const projectId = req.headers.get("x-project-id");
+      const fnRaw = req.headers.get("x-filename");
+      const filename = fnRaw ? decodeURIComponent(fnRaw) : "";
+      const mimeType = req.headers.get("x-mime-type") || null;
+      const fileSize = parseInt(req.headers.get("x-file-size") || "0", 10);
+      if (!projectId || !filename || !req.body) {
+        return json({ error: "bad params (x-project-id, x-filename, body required)" }, 400);
       }
 
-      const bytes = Uint8Array.from(atob(fileBase64), (c) => c.charCodeAt(0));
       const safeName = filename.replace(/[\/\\]/g, "_");
       const diskPath = `projects/${projectId}/${crypto.randomUUID()}__${safeName}`;
 
@@ -99,10 +100,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await ncMkcol("projects");
       await ncMkcol(`projects/${projectId}`);
 
+      // СТРИМ: тело запроса напрямую в WebDAV PUT, без буферизации в память
       const put = await fetch(`${DAV_BASE}/${encodePath(diskPath)}`, {
         method: "PUT",
-        headers: { Authorization: NC_AUTH },
-        body: bytes,
+        headers: { Authorization: NC_AUTH, "Content-Type": mimeType || "application/octet-stream" },
+        body: req.body,
+        // @ts-ignore — duplex обязателен для стрим-тела в fetch (deno/undici)
+        duplex: "half",
       });
       if (![200, 201, 204].includes(put.status)) {
         return json({ error: `webdav put failed: ${put.status}` }, 502);
@@ -117,7 +121,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           owner_id: uid,
           filename: safeName,
           disk_path: diskPath,
-          file_size: bytes.length,
+          file_size: fileSize,
           mime_type: mimeType,
           is_public: false,
           public_url: null,
@@ -135,6 +139,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const rows = await ins.json();
       return json({ file: Array.isArray(rows) ? rows[0] : rows });
     }
+
+    // ─── Прочие действия — JSON-тело ──────────────────────────────────────────
+    const body = await req.json().catch(() => ({} as Record<string, unknown>));
+    const action = body.action as string;
 
     // ─── DOWNLOAD ─────────────────────────────────────────────────────────
     if (action === "download") {
