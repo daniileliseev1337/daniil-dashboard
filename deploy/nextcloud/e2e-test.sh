@@ -2,7 +2,11 @@
 # E2E проверка файлового хранилища 6.3: upload -> download -> delete через
 # Edge Function `nextcloud` с настоящим JWT существующего пользователя (HS256,
 # подпись секретом локального Supabase). Проверяет всю цепочку: RLS + WebDAV.
-# Только чтение конфигов + временный тестовый файл, который сам же удаляет.
+#
+# upload — БИНАРНЫЙ протокол (стрим тела + метаданные в заголовках x-*).
+# Тестируем И маленький, И большой (25МБ) файл: большой раньше валил worker
+# Edge Function по памяти (base64-буферизация) — теперь должен пройти стримом.
+# Только чтение конфигов + временные тестовые файлы, которые сам же удаляет.
 set -euo pipefail
 SUPA=/srv/supabase-src/docker
 FN=http://localhost:8000/functions/v1/nextcloud
@@ -30,29 +34,50 @@ s=b(hmac.new(secret.encode(),h+b'.'+p,hashlib.sha256).digest())
 print((h+b'.'+p+b'.'+s).decode())
 PY
 )"
-
 AUTH="Authorization: Bearer $JWT"
-CT="Content-Type: application/json"
-B64="$(printf 'nextcloud e2e %s' "$(date -u +%FT%TZ)" | base64 -w0)"
 
-echo "===== UPLOAD ====="
-printf '{"action":"upload","projectId":"%s","filename":"e2e_test.txt","mimeType":"text/plain","fileBase64":"%s"}' "$PID_" "$B64" > /tmp/up.json
-UP="$(curl -s -m 30 -X POST "$FN" -H "$AUTH" -H "$CT" --data @/tmp/up.json)"
-echo "$UP"
-FID="$(echo "$UP" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("file",{}).get("id",""))' 2>/dev/null || true)"
-echo "file_id=$FID"
-[ -n "$FID" ] || { echo "UPLOAD FAILED"; exit 1; }
+# upload через бинарный протокол: $1=путь файла, $2=имя, $3=mime; печатает file_id
+up(){
+  local path="$1" name="$2" mime="$3"
+  curl -s -m 120 -X POST "$FN" \
+    -H "$AUTH" \
+    -H "Content-Type: application/octet-stream" \
+    -H "x-action: upload" \
+    -H "x-project-id: $PID_" \
+    -H "x-filename: $name" \
+    -H "x-mime-type: $mime" \
+    -H "x-file-size: $(stat -c%s "$path")" \
+    --data-binary @"$path"
+}
 
-echo "===== DOWNLOAD ====="
-printf '{"action":"download","id":"%s"}' "$FID" > /tmp/dl2.json
-curl -s -m 30 -X POST "$FN" -H "$AUTH" -H "$CT" --data @/tmp/dl2.json -w '\n[download HTTP %{http_code}]\n'
+FAIL=0
 
-echo "===== DELETE ====="
-printf '{"action":"delete","id":"%s"}' "$FID" > /tmp/del.json
-curl -s -m 30 -X POST "$FN" -H "$AUTH" -H "$CT" --data @/tmp/del.json -w '\n[delete HTTP %{http_code}]\n'
+echo "===== UPLOAD small (text) ====="
+printf 'nextcloud e2e %s' "$(date -u +%FT%TZ)" > /tmp/small.txt
+RS="$(up /tmp/small.txt e2e_small.txt text/plain)"; echo "$RS"
+FID_S="$(echo "$RS" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("file",{}).get("id",""))' 2>/dev/null || true)"
+[ -n "$FID_S" ] && echo "small OK id=$FID_S" || { echo "SMALL UPLOAD FAILED"; FAIL=1; }
 
-echo "===== VERIFY GONE (expect 403/not found) ====="
-curl -s -m 30 -X POST "$FN" -H "$AUTH" -H "$CT" --data @/tmp/dl2.json -w '\n[download-after-delete HTTP %{http_code}]\n'
+echo "===== UPLOAD large (25MB) — раньше валил worker по памяти ====="
+dd if=/dev/urandom of=/tmp/big.bin bs=1M count=25 status=none
+RL="$(up /tmp/big.bin e2e_big.bin application/octet-stream)"; echo "$RL"
+FID_L="$(echo "$RL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("file",{}).get("id",""))' 2>/dev/null || true)"
+SZ_L="$(echo "$RL" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("file",{}).get("file_size",""))' 2>/dev/null || true)"
+[ -n "$FID_L" ] && echo "large OK id=$FID_L file_size=$SZ_L (ожидаем 26214400)" || { echo "LARGE UPLOAD FAILED"; FAIL=1; }
 
-rm -f /tmp/up.json /tmp/dl2.json /tmp/del.json
-echo "E2E_DONE"
+echo "===== DOWNLOAD large -> проверка размера ====="
+if [ -n "$FID_L" ]; then
+  curl -s -m 120 -X POST "$FN" -H "$AUTH" -H "Content-Type: application/json" \
+    --data "{\"action\":\"download\",\"id\":\"$FID_L\"}" -o /tmp/big_dl.bin -w '[download HTTP %{http_code}]\n'
+  echo "downloaded bytes=$(stat -c%s /tmp/big_dl.bin) (ожидаем 26214400)"
+  cmp -s /tmp/big.bin /tmp/big_dl.bin && echo "content_match=TRUE" || { echo "content_match=FALSE"; FAIL=1; }
+fi
+
+echo "===== CLEANUP (delete both) ====="
+for fid in "$FID_S" "$FID_L"; do
+  [ -n "$fid" ] && curl -s -m 30 -X POST "$FN" -H "$AUTH" -H "Content-Type: application/json" \
+    --data "{\"action\":\"delete\",\"id\":\"$fid\"}" -w ' [delete HTTP %{http_code}]\n'
+done
+
+rm -f /tmp/small.txt /tmp/big.bin /tmp/big_dl.bin
+[ "$FAIL" = 0 ] && echo "E2E_PASS" || echo "E2E_FAIL"

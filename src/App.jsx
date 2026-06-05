@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
+import { diffLines } from "./lib/lineDiff";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -12,7 +13,7 @@ import {
   Briefcase, Receipt, BadgeCheck, Loader2, Mail,
   Phone, Send, ExternalLink,
   // ── v1.5: иконки для админ-панели, команды, клиентов, прав ──
-  ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck,
+  ShieldCheck, Crown, PencilLine, UserPlus, UserMinus, UserCheck, KeyRound,
   Building2, MapPin, Hash, Star, Activity, ScrollText, BookUser,
   ChevronDown, IdCard, Phone as PhoneIcon,
   // ── v2.0: иконки маркетплейса, комментариев, файлов ──
@@ -190,6 +191,26 @@ const TASK_STATUS_BADGE = {
   "Новая": "bg-zinc-600", "В работе": "bg-amber-600", "На проверке": "bg-sky-600",
   "Готово": "bg-emerald-600", "Отменена": "bg-zinc-800",
 };
+
+// ── v3.0 6.4b: версии ТЗ и комментарии задач ──
+function versionDbToJs(r) {
+  return {
+    id: r.id, taskId: r.task_id, versionNo: r.version_no,
+    content: r.content ?? "", status: r.status,
+    proposedBy: r.proposed_by, proposedByName: r.proposed_by_name ?? "Пользователь",
+    resolvedBy: r.resolved_by ?? null, resolvedByName: r.resolved_by_name ?? null,
+    createdAt: r.created_at, resolvedAt: r.resolved_at ?? null,
+  };
+}
+function commentDbToJs(r) {
+  return {
+    id: r.id, taskId: r.task_id,
+    authorId: r.author_id, authorName: r.author_name ?? "Пользователь",
+    body: r.body ?? "", isQuestion: !!r.is_question, resolved: !!r.resolved,
+    resolvedBy: r.resolved_by ?? null, resolvedByName: r.resolved_by_name ?? null,
+    resolvedAt: r.resolved_at ?? null, createdAt: r.created_at,
+  };
+}
 
 // ────────────────────────────────────────────────────────────────────────
 // Маппинг записей клиентской базы (v1.5)
@@ -555,6 +576,15 @@ async function adminSystemStats(client) {
   return data || {};
 }
 
+// Сброс пароля пользователя администратором (без SMTP). Защита — is_admin() внутри RPC.
+async function adminResetPassword(client, userId, newPassword) {
+  const { error } = await client.rpc("admin_reset_password", {
+    p_user_id: userId,
+    p_new_password: newPassword,
+  });
+  if (error) throw error;
+}
+
 async function adminFetchActivityLog(client, limit = 50) {
   const { data, error } = await client
     .from("activity_log")
@@ -649,6 +679,52 @@ async function notifyTask(client, type, taskId, initiatorId) {
   } catch (e) { console.warn("task notify failed:", e); }
 }
 
+// ── v3.0 6.4b: версии ТЗ — API-обёртки (RPC Плана 1) ──
+async function fetchTaskVersions(client, taskId) {
+  const { data, error } = await client.rpc("get_task_versions", { p_task_id: taskId });
+  if (error) throw error;
+  return (data || []).map(versionDbToJs);
+}
+async function proposeTzVersion(client, taskId, content) {
+  const { data, error } = await client.rpc("propose_tz_version", { p_task_id: taskId, p_content: content });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+async function approveTzVersion(client, versionId) {
+  const { data, error } = await client.rpc("approve_tz_version", { p_version_id: versionId });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+async function rejectTzVersion(client, versionId) {
+  const { data, error } = await client.rpc("reject_tz_version", { p_version_id: versionId });
+  if (error) throw error;
+  return versionDbToJs(data);
+}
+
+// ── v3.0 6.4b: обсуждение задачи + смена статуса ──
+async function fetchTaskComments(client, taskId) {
+  const { data, error } = await client.rpc("get_task_comments", { p_task_id: taskId });
+  if (error) throw error;
+  return (data || []).map(commentDbToJs);
+}
+async function insertTaskComment(client, taskId, body, isQuestion) {
+  const uid = (await client.auth.getUser()).data.user.id;
+  const { error } = await client.from("task_comments").insert({
+    task_id: taskId, author_id: uid, body, is_question: !!isQuestion,
+  });
+  if (error) throw error;
+}
+async function resolveTaskQuestion(client, commentId, resolved) {
+  const { data, error } = await client.rpc("resolve_question", { p_comment_id: commentId, p_resolved: !!resolved });
+  if (error) throw error;
+  return commentDbToJs(data);
+}
+async function setTaskStatus(client, taskId, status) {
+  const { data, error } = await client.rpc("set_task_status", { p_task_id: taskId, p_status: status });
+  if (error) throw error;
+  return taskDbToJs(data);
+}
+
 // ── v3.0: Nextcloud — функции файлового хранилища ────────────────────────
 // Доступ к файлам идёт через Edge Function `nextcloud` (Nextcloud наружу не
 // выставлен). Права проверяются в функции через RLS под JWT пользователя.
@@ -668,20 +744,20 @@ async function fetchProjectFiles(client, projectId) {
 }
 
 async function uploadProjectFile(client, projectId, file, isPublic) {
-  // Читаем файл как base64
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result.split(",")[1]);
-    reader.onerror = () => reject(new Error("Ошибка чтения файла"));
-    reader.readAsDataURL(file);
+  // Бинарная загрузка: шлём сырой File (стримится), метаданные — в заголовках.
+  // НЕ читаем файл в base64 — иначе worker Edge Function упирается в memory limit.
+  const { data, error } = await client.functions.invoke("nextcloud", {
+    body: file,
+    headers: {
+      "x-action":     "upload",
+      "x-project-id": projectId,
+      "x-filename":   encodeURIComponent(file.name),
+      "x-mime-type":  file.type || "application/octet-stream",
+      "x-file-size":  String(file.size),
+    },
   });
-  return ncAction(client, "upload", {
-    projectId,
-    filename:   file.name,
-    mimeType:   file.type || "application/octet-stream",
-    isPublic,
-    fileBase64: base64,
-  });
+  if (error) throw error;
+  return data;
 }
 
 // Nextcloud внутренний — прямой ссылки нет: функция стримит файл, получаем Blob.
@@ -1164,7 +1240,7 @@ function AuthScreen({ onAuthenticated, onError }) {
         }
         onAuthenticated(user, profile);
       } else {
-        // Регистрация — Supabase отправит письмо для подтверждения
+        // Регистрация: autoconfirm включён (письма нет) — аккаунт создаётся и ждёт одобрения админом
         await signUpWithPassword(client, email.trim(), password);
         setMode("check_email");
       }
@@ -1238,7 +1314,7 @@ function AuthScreen({ onAuthenticated, onError }) {
             letterSpacing: "0.14em",
             fontWeight: 500,
           }}>
-            Рабочий центр · Проекты · Финансы
+            Искусство климата, инженерия комфорта
           </div>
         </div>
 
@@ -1256,7 +1332,7 @@ function AuthScreen({ onAuthenticated, onError }) {
                 margin: "0 auto 16px",
                 color: "#e8c860",
               }}>
-                <Mail size={28} strokeWidth={1.8} />
+                <Hourglass size={28} strokeWidth={1.8} />
               </div>
               <div style={{
                 fontSize: 17,
@@ -1265,12 +1341,11 @@ function AuthScreen({ onAuthenticated, onError }) {
                 marginBottom: 8,
                 letterSpacing: "-0.02em",
               }}>
-                Проверь почту
+                Заявка отправлена
               </div>
               <p style={{ fontSize: 13, color: "#9b9ca4", marginBottom: 20, lineHeight: 1.55 }}>
-                На <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> отправлено письмо
-                с ссылкой для подтверждения. Перейди по ней, потом возвращайся
-                и войди.
+                Аккаунт <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> создан
+                и ожидает одобрения администратором. После одобрения вы сможете войти.
               </p>
               <button
                 onClick={() => { setMode("signin"); setError(null); }}
@@ -1390,6 +1465,11 @@ function AuthScreen({ onAuthenticated, onError }) {
                   </>
                 )}
               </div>
+              {mode === "signin" && (
+                <div style={{ textAlign: "center", fontSize: 11, color: "#62646b", marginTop: 10 }}>
+                  Забыли пароль? Обратитесь к администратору
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1556,11 +1636,6 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
                   <Send size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
                 </div>
               ))}
-            </div>
-          )}
-          {f.executorUserId && (
-            <div style={{ fontSize: 10, color: "#6ee7a8", marginTop: 3, display: "flex", alignItems: "center", gap: 4 }}>
-              <Send size={9} strokeWidth={2.4} /> Уведомление в Telegram будет отправлено
             </div>
           )}
         </div>
@@ -2967,7 +3042,22 @@ function ProjectTasksSection({ projectId, client, profile, showToast }) {
   );
 }
 
-function TaskModal({ task, client, profile, projects, onClose, onSaved, showToast }) {
+// Рендер построчного diff (git-стиль): del — красным, add — зелёным, equal — приглушённо.
+function DiffView({ oldText, newText }) {
+  const segs = diffLines(oldText, newText);
+  if (!segs.length) return <div className="text-xs opacity-50 py-1">— пусто —</div>;
+  return (
+    <div className="font-mono text-xs rounded bg-zinc-950 p-2 overflow-x-auto" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+      {segs.map((s, i) => {
+        if (s.type === "del") return <div key={i} style={{ color: "#f8a3a3", background: "rgba(248,163,163,0.08)" }}>- {s.text || " "}</div>;
+        if (s.type === "add") return <div key={i} style={{ color: "#6ee7a8", background: "rgba(110,231,168,0.08)" }}>+ {s.text || " "}</div>;
+        return <div key={i} style={{ color: "#a8a8a3" }}>&nbsp;&nbsp;{s.text || " "}</div>;
+      })}
+    </div>
+  );
+}
+
+function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onSaved, showToast }) {
   const isNew = !task.id;
   const [form, setForm] = useState({
     projectId: task.projectId || "", assignedTo: task.assignedTo || "",
@@ -2975,19 +3065,146 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
     status: task.status || "Новая", priority: task.priority || "Обычный",
     dueDate: task.dueDate || "",
   });
-  const [members, setMembers] = useState([]);
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
 
+  // 6.4b: исполнитель выбирается из всех одобренных пользователей через
+  // search_approved_users (единый источник с ProjectForm). assigneeName хранит
+  // отображаемое имя выбранного/назначенного — RPC исключает текущего юзера
+  // (id != auth.uid()), поэтому имя самого себя и уже назначенного держим локально.
+  const [assigneeName, setAssigneeName] = useState(task.assigneeName || "");
+  const [execQuery, setExecQuery] = useState("");
+  const [execResults, setExecResults] = useState([]);
+
+  // ── 6.4b: версии ТЗ ──
+  const [versions, setVersions] = useState([]);
+  const [verLoading, setVerLoading] = useState(false);
+  const [editingTz, setEditingTz] = useState(false);
+  const [tzDraft, setTzDraft] = useState("");
+  const [tzBusy, setTzBusy] = useState(false);
+  const [openVerId, setOpenVerId] = useState(null); // версия, раскрытая в истории для diff
+
+  // ── 6.4b: обсуждение ──
+  const [comments, setComments] = useState([]);
+  const [cmtLoading, setCmtLoading] = useState(false);
+  const [cmtText, setCmtText] = useState("");
+  const [cmtIsQuestion, setCmtIsQuestion] = useState(false);
+  const [cmtSending, setCmtSending] = useState(false);
+
+  const reloadVersions = useCallback(async () => {
+    if (isNew || !task.id) return;
+    setVerLoading(true);
+    try { setVersions(await fetchTaskVersions(client, task.id)); }
+    catch (e) { showToast("Ошибка загрузки версий ТЗ: " + (e.message || ""), "error"); }
+    finally { setVerLoading(false); }
+  }, [isNew, task.id, client, showToast]);
+  useEffect(() => { reloadVersions(); }, [reloadVersions]);
+
+  const reloadComments = useCallback(async () => {
+    if (isNew || !task.id) return;
+    setCmtLoading(true);
+    try { setComments(await fetchTaskComments(client, task.id)); }
+    catch (e) { showToast("Ошибка загрузки обсуждения: " + (e.message || ""), "error"); }
+    finally { setCmtLoading(false); }
+  }, [isNew, task.id, client, showToast]);
+  useEffect(() => { reloadComments(); }, [reloadComments]);
+
+  // 6.4b: realtime-сигнал по открытой задаче -> рефетч дочерних данных
   useEffect(() => {
-    (async () => {
-      if (!form.projectId) { setMembers([]); return; }
+    if (realtimeTick) { reloadVersions(); reloadComments(); }
+  }, [realtimeTick, reloadVersions, reloadComments]);
+
+  // действующая (последняя approved) и pending
+  const approvedVers = versions.filter(v => v.status === "approved");
+  const currentVer = approvedVers.length ? approvedVers[approvedVers.length - 1] : null;
+  const currentTz = currentVer ? currentVer.content : (task.description || "");
+  const pendingVer = versions.find(v => v.status === "pending") || null;
+  // противоположная сторона относительно предложившего pending
+  const isProposer = pendingVer && pendingVer.proposedBy === profile.id;
+  const isParty = task.authorId === profile.id || task.assignedTo === profile.id;
+  const canDecide = pendingVer && !isProposer && isParty;
+
+  const openQuestions = comments.filter(c => c.isQuestion && !c.resolved).length;
+  const canResolveQ = task.authorId === profile.id || task.assignedTo === profile.id || profile.role === "admin";
+
+  const proposeTz = async () => {
+    if (!tzDraft.trim()) { showToast("Текст ТЗ пуст", "error"); return; }
+    setTzBusy(true);
+    try {
+      await proposeTzVersion(client, task.id, tzDraft);
+      setEditingTz(false); setTzDraft("");
+      await reloadVersions();
+      notifyTask(client, "task_tz_proposed", task.id, profile.id);
+      showToast("Изменение ТЗ предложено");
+    } catch (e) {
+      const m = e.message || "";
+      if (m.includes("tz_pending_exists")) showToast("Уже есть ожидающее изменение ТЗ — дождитесь решения", "error");
+      else showToast("Ошибка: " + m, "error");
+    } finally { setTzBusy(false); }
+  };
+  const decideTz = async (approve) => {
+    if (!pendingVer) return;
+    try {
+      if (approve) { await approveTzVersion(client, pendingVer.id); notifyTask(client, "task_tz_approved", task.id, profile.id); }
+      else { await rejectTzVersion(client, pendingVer.id); notifyTask(client, "task_tz_rejected", task.id, profile.id); }
+      await reloadVersions();
+      showToast(approve ? "Изменение ТЗ принято" : "Изменение ТЗ отклонено");
+    } catch (e) {
+      const m = e.message || "";
+      if (m.includes("proposer_cannot_approve")) showToast("Свою версию подтверждает другая сторона", "error");
+      else showToast("Ошибка: " + m, "error");
+    }
+  };
+
+  const sendComment = async () => {
+    if (!cmtText.trim()) return;
+    setCmtSending(true);
+    try {
+      const wasQuestion = cmtIsQuestion;
+      await insertTaskComment(client, task.id, cmtText.trim(), wasQuestion);
+      setCmtText(""); setCmtIsQuestion(false);
+      await reloadComments();
+      if (wasQuestion) notifyTask(client, "task_question", task.id, profile.id);
+    } catch (e) { showToast("Ошибка отправки: " + (e.message || ""), "error"); }
+    finally { setCmtSending(false); }
+  };
+  const toggleResolve = async (commentId, val) => {
+    try { await resolveTaskQuestion(client, commentId, val); await reloadComments(); }
+    catch (e) { showToast("Ошибка: " + (e.message || ""), "error"); }
+  };
+
+  // 6.4b: autocomplete по одобренным пользователям (как в ProjectForm).
+  // search_approved_users исключает самого себя, поэтому текущего пользователя
+  // добавляем в результаты вручную, если он подходит под запрос.
+  useEffect(() => {
+    if (!client || !execQuery.trim()) { setExecResults([]); return; }
+    const t = setTimeout(async () => {
       try {
-        const m = await client.rpc("get_project_members", { p_project_id: form.projectId });
-        setMembers(m.data || []);
-      } catch { setMembers([]); }
-    })();
-  }, [form.projectId, client]);
+        const res = await searchApprovedUsers(client, execQuery);
+        const q = execQuery.trim().toLowerCase();
+        const selfMatches = profile?.id &&
+          ((profile.name || "").toLowerCase().includes(q) || (profile.email || "").toLowerCase().includes(q));
+        const out = (selfMatches && !res.some(u => u.id === profile.id))
+          ? [{ id: profile.id, name: profile.name, email: profile.email }, ...res]
+          : res;
+        setExecResults(out);
+      } catch { setExecResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [execQuery, client, profile]); // eslint-disable-line
+
+  const selectAssignee = (user) => {
+    setForm(f => ({ ...f, assignedTo: user.id }));
+    setAssigneeName(user.name || user.email || "");
+    setExecQuery("");
+    setExecResults([]);
+  };
+  const clearAssignee = () => {
+    setForm(f => ({ ...f, assignedTo: "" }));
+    setAssigneeName("");
+    setExecQuery("");
+    setExecResults([]);
+  };
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -3002,7 +3219,22 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
       } else {
         const assigneeChanged = (task.assignedTo || "") !== (form.assignedTo || "");
         const statusChanged = task.status !== form.status;
-        await updateTask(client, task.id, form);
+        // явный whitelist полей: description версионируется отдельно (RPC),
+        // status меняется через setTaskStatus ниже — здесь их не шлём.
+        await updateTask(client, task.id, {
+          title: form.title,
+          projectId: form.projectId,
+          assignedTo: form.assignedTo,
+          priority: form.priority,
+          dueDate: form.dueDate,
+        });
+        if (statusChanged) {
+          try { await setTaskStatus(client, task.id, form.status); }
+          catch (e) {
+            if ((e.message || "").includes("only_author_can_complete")) { showToast("В «Готово» переводит только автор задачи", "error"); setSaving(false); return; }
+            throw e;
+          }
+        }
         if (assigneeChanged && form.assignedTo) await notifyTask(client, "task_assigned", task.id, profile.id);
         if (statusChanged) await notifyTask(client, "task_status", task.id, profile.id);
       }
@@ -3019,7 +3251,7 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
 
   const accept = async () => {
     try {
-      await updateTask(client, task.id, { status: "В работе" });
+      await setTaskStatus(client, task.id, "В работе");
       await notifyTask(client, "task_status", task.id, profile.id);
       onSaved();
     } catch (e) { showToast("Ошибка: " + (e.message || ""), "error"); }
@@ -3031,17 +3263,117 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
         <h3 className="text-lg font-semibold mb-3">{isNew ? "Новая задача" : "Задача"}</h3>
         <input className="w-full bg-zinc-800 rounded px-3 py-2 mb-2" placeholder="Заголовок"
                value={form.title} onChange={e => set("title", e.target.value)} />
-        <textarea className="w-full bg-zinc-800 rounded px-3 py-2 mb-2" rows={4} placeholder="Описание (ТЗ)"
-               value={form.description} onChange={e => set("description", e.target.value)} />
+        {isNew ? (
+          <textarea className="w-full bg-zinc-800 rounded px-3 py-2 mb-2" rows={4} placeholder="Описание (ТЗ)"
+                 value={form.description} onChange={e => set("description", e.target.value)} />
+        ) : (
+          <div className="mb-3">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs uppercase opacity-60">Техническое задание</span>
+              {!editingTz && !pendingVer && (
+                <button onClick={() => { setEditingTz(true); setTzDraft(currentTz); }}
+                        className="text-xs text-amber-400 underline">Изменить ТЗ</button>
+              )}
+            </div>
+            {!editingTz && (
+              <div className="bg-zinc-800 rounded px-3 py-2 text-sm" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {currentTz || <span className="opacity-50">— ТЗ не задано —</span>}
+              </div>
+            )}
+            {editingTz && (
+              <div>
+                <textarea className="w-full bg-zinc-800 rounded px-3 py-2" rows={5}
+                          value={tzDraft} onChange={e => setTzDraft(e.target.value)} />
+                <div className="flex gap-2 mt-1">
+                  <button onClick={proposeTz} disabled={tzBusy}
+                          className="px-3 py-1 rounded bg-amber-500 text-black text-sm font-semibold">
+                    {tzBusy ? "…" : "Предложить изменение"}</button>
+                  <button onClick={() => { setEditingTz(false); setTzDraft(""); }}
+                          className="px-3 py-1 rounded bg-zinc-700 text-sm">Отмена</button>
+                </div>
+              </div>
+            )}
+
+            {/* Баннер pending-версии */}
+            {pendingVer && (
+              <div className="mt-3 rounded border border-amber-500/40 bg-amber-500/5 p-2">
+                <div className="text-xs font-semibold text-amber-300 mb-1">
+                  Предложены изменения ТЗ · v{pendingVer.versionNo} · {pendingVer.proposedByName} · {fmtDT(pendingVer.createdAt)}
+                </div>
+                <DiffView oldText={currentTz} newText={pendingVer.content} />
+                {canDecide ? (
+                  <div className="flex gap-2 mt-2">
+                    <button onClick={() => decideTz(true)} className="px-3 py-1 rounded bg-emerald-600 text-white text-sm font-semibold">Принять</button>
+                    <button onClick={() => decideTz(false)} className="px-3 py-1 rounded bg-red-600 text-white text-sm font-semibold">Отклонить</button>
+                  </div>
+                ) : (
+                  <div className="text-xs opacity-60 mt-2">{isProposer ? "Ожидает подтверждения другой стороны" : "Решение принимает сторона задачи"}</div>
+                )}
+              </div>
+            )}
+
+            {/* История ТЗ */}
+            {versions.length > 0 && (
+              <div className="mt-3">
+                <div className="text-xs uppercase opacity-60 mb-1">История ТЗ</div>
+                {verLoading ? <div className="text-xs opacity-50">Загрузка…</div> : versions.slice().reverse().map(v => {
+                  // diff против предыдущей approved-версии (по version_no)
+                  const prevApproved = approvedVers.filter(a => a.versionNo < v.versionNo).slice(-1)[0] || null;
+                  const opened = openVerId === v.id;
+                  const stColor = v.status === "approved" ? "#6ee7a8" : v.status === "pending" ? "#d4af37" : "#f8a3a3";
+                  return (
+                    <div key={v.id} className="border-b border-white/5 py-1">
+                      <button onClick={() => setOpenVerId(opened ? null : v.id)} className="flex items-center gap-2 text-xs w-full text-left">
+                        <span style={{ color: stColor }}>●</span>
+                        <span className="opacity-80">v{v.versionNo}</span>
+                        <span className="opacity-60">{v.proposedByName}</span>
+                        <span className="opacity-40">{fmtDT(v.createdAt)}</span>
+                        <span className="opacity-50">{v.status}</span>
+                      </button>
+                      {opened && (
+                        <div className="mt-1">
+                          {prevApproved
+                            ? <DiffView oldText={prevApproved.content} newText={v.content} />
+                            : <DiffView oldText="" newText={v.content} />}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.projectId} onChange={e => set("projectId", e.target.value)}>
             <option value="">Без проекта (личная)</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <select className="bg-zinc-800 rounded px-2 py-2" value={form.assignedTo} onChange={e => set("assignedTo", e.target.value)}>
-            <option value="">Исполнитель: —</option>
-            {members.map(m => <option key={m.user_id || m.id} value={m.user_id || m.id}>{m.name || m.email}</option>)}
-          </select>
+          {form.assignedTo ? (
+            <div className="bg-zinc-800 rounded px-2 py-2 flex items-center gap-2">
+              <span className="text-xs opacity-60 shrink-0">Исполнитель:</span>
+              <span className="truncate flex-1">{assigneeName || "—"}</span>
+              <button type="button" onClick={clearAssignee}
+                className="text-zinc-400 hover:text-zinc-100 shrink-0" title="Сбросить исполнителя">×</button>
+            </div>
+          ) : (
+            <div style={{ position: "relative" }}>
+              <input className="w-full bg-zinc-800 rounded px-2 py-2" placeholder="Исполнитель: поиск по имени/почте"
+                value={execQuery} onChange={e => setExecQuery(e.target.value)}
+                onBlur={() => setTimeout(() => setExecResults([]), 200)} />
+              {execResults.length > 0 && (
+                <div className="absolute left-0 right-0 z-50 mt-1 bg-zinc-800 border border-white/10 rounded overflow-hidden">
+                  {execResults.map(u => (
+                    <div key={u.id} onMouseDown={() => selectAssignee(u)}
+                      className="px-3 py-2 cursor-pointer text-sm hover:bg-zinc-700 flex items-center gap-2">
+                      <span className="text-zinc-100">{u.name || u.email}</span>
+                      {u.name && <span className="text-zinc-500 text-xs truncate">{u.email}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <select className="bg-zinc-800 rounded px-2 py-2" value={form.status} onChange={e => set("status", e.target.value)}>
             {TASK_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -3050,6 +3382,60 @@ function TaskModal({ task, client, profile, projects, onClose, onSaved, showToas
           </select>
           <input type="date" className="bg-zinc-800 rounded px-2 py-2" value={form.dueDate || ""} onChange={e => set("dueDate", e.target.value)} />
         </div>
+
+        {!isNew && (
+          <div className="mt-4 border-t border-white/10 pt-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs uppercase opacity-60">Обсуждение</span>
+              {openQuestions > 0 && (
+                <span className="text-xs font-semibold text-amber-300 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">
+                  {openQuestions} {openQuestions === 1 ? "открытый вопрос" : "открытых вопросов"}
+                </span>
+              )}
+            </div>
+            {cmtLoading ? <div className="text-xs opacity-50">Загрузка…</div> :
+             comments.length === 0 ? <div className="text-xs opacity-50 mb-2">Пока нет сообщений</div> :
+             <div className="mb-2 max-h-60 overflow-y-auto">
+               {comments.map(c => (
+                 <div key={c.id} className="flex gap-2 py-2 border-b border-white/5">
+                   <UserAvatar name={c.authorName} size={26} />
+                   <div className="flex-1 min-w-0">
+                     <div className="flex items-center gap-2 flex-wrap">
+                       <span className="text-xs font-semibold text-zinc-100">{c.authorName}</span>
+                       <span className="text-[10px] opacity-50">{fmtDT(c.createdAt)}</span>
+                       {c.isQuestion && (
+                         <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                           color: c.resolved ? "#6ee7a8" : "#d4af37",
+                           background: c.resolved ? "rgba(110,231,168,0.08)" : "rgba(212,175,55,0.10)",
+                           border: `1px solid ${c.resolved ? "rgba(110,231,168,0.25)" : "rgba(212,175,55,0.30)"}`,
+                         }}>{c.resolved ? "✓ вопрос решён" : "вопрос"}</span>
+                       )}
+                     </div>
+                     <p className="m-0 text-sm text-zinc-300" style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", lineHeight: 1.5 }}>{c.body}</p>
+                     {c.isQuestion && canResolveQ && (
+                       c.resolved
+                         ? <button onClick={() => toggleResolve(c.id, false)} className="text-[11px] text-zinc-500 underline mt-1">↩ Переоткрыть</button>
+                         : <button onClick={() => toggleResolve(c.id, true)} className="text-[11px] text-emerald-400 underline mt-1">✓ Пометить решённым</button>
+                     )}
+                   </div>
+                 </div>
+               ))}
+             </div>}
+            <div className="flex gap-2 items-end">
+              <textarea value={cmtText} onChange={e => setCmtText(e.target.value)} rows={2}
+                        onKeyDown={e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) sendComment(); }}
+                        placeholder="Сообщение… (Ctrl+Enter — отправить)"
+                        className="flex-1 bg-zinc-800 rounded px-3 py-2 text-sm" style={{ resize: "none" }} />
+              <button onClick={sendComment} disabled={cmtSending || !cmtText.trim()}
+                      className="px-3 py-2 rounded bg-amber-500 text-black text-sm font-semibold whitespace-nowrap">
+                {cmtSending ? "…" : "Отправить"}</button>
+            </div>
+            <label className="flex items-center gap-1 text-xs mt-1 opacity-80">
+              <input type="checkbox" checked={cmtIsQuestion} onChange={e => setCmtIsQuestion(e.target.checked)} /> Это вопрос
+            </label>
+          </div>
+        )}
+
         <div className="flex justify-between mt-3">
           {!isNew ? <button onClick={() => confirmDel ? remove() : setConfirmDel(true)} className="text-red-400 text-sm">{confirmDel ? "Точно удалить?" : "Удалить"}</button> : <span />}
           <div className="flex gap-2">
@@ -3072,10 +3458,15 @@ function TasksBoard({ tasks, onOpen, onReload, client, profile, badge, showToast
     const t = tasks.find(x => x.id === taskId);
     if (!t || t.status === toStatus) return;
     try {
-      await updateTask(client, taskId, { status: toStatus });
+      await setTaskStatus(client, taskId, toStatus);
       await notifyTask(client, "task_status", taskId, profile.id);
       onReload();
-    } catch (e) { showToast("Ошибка смены статуса: " + (e.message || ""), "error"); onReload(); }
+    } catch (e) {
+      const m = e.message || "";
+      if (m.includes("only_author_can_complete")) showToast("В «Готово» переводит только автор задачи", "error");
+      else showToast("Ошибка смены статуса: " + m, "error");
+      onReload();
+    }
   };
   return (
     <div className="flex gap-3 overflow-x-auto">
@@ -3106,6 +3497,10 @@ function TasksView({ client, profile, projects, showToast }) {
   const [fStatus, setFStatus] = useState("");
   const [onlyMine, setOnlyMine] = useState(false);
   const [editing, setEditing] = useState(null);
+  // ref на открытую задачу: realtime-колбэк читает editingRef.current, чтобы
+  // открытие/закрытие модалки не пересоздавало канал (иначе churn -> потеря событий).
+  const editingRef = useRef(null);
+  useEffect(() => { editingRef.current = editing; }, [editing]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -3119,6 +3514,55 @@ function TasksView({ client, profile, projects, showToast }) {
     finally { setLoading(false); }
   }, [fProject, fStatus, onlyMine, client, profile, showToast]);
   useEffect(() => { reload(); }, [reload]);
+
+  // ── 6.4b: Realtime-подписка на project_tasks ──
+  // tick инкрементируется при realtime-событии по id открытой задачи -> модалка
+  // делает refetch версий/комментариев (дочерние таблицы не в publication).
+  const [openTaskTick, setOpenTaskTick] = useState(0);
+
+  // клиентский фолбэк-фильтр приватности: пускаем строку в состояние только если
+  // она проходит базовую проверку доступа (страховка поверх RLS на канале).
+  const canSeeRow = useCallback((row) => {
+    if (!row) return false;
+    if (profile?.role === "admin") return true;
+    if (row.project_id == null) {
+      // личная задача: видит автор или исполнитель
+      return row.author_id === profile.id || row.assigned_to === profile.id;
+    }
+    // проектная: видна, если проект уже в доступном списке (projects проп) ИЛИ
+    // пользователь — сторона задачи. Жёстче серверной RLS, но безопасно (не «течёт»).
+    return projects.some(p => p.id === row.project_id) || row.author_id === profile.id || row.assigned_to === profile.id;
+  }, [profile, projects]);
+
+  useEffect(() => {
+    const channel = client
+      .channel("project_tasks")
+      .on("postgres_changes", { event: "*", schema: "public", table: "project_tasks" }, (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload;
+        setTasks(prev => {
+          if (eventType === "DELETE") return prev.filter(t => t.id !== oldRow.id);
+          if (!canSeeRow(newRow)) {
+            // строка вне доступа — убираем, если вдруг была в состоянии
+            return prev.filter(t => t.id !== newRow.id);
+          }
+          const mapped = taskDbToJs(newRow); // payload не содержит *_name -> projectName/assigneeName будут null
+          // сохраняем уже известные denormalized-имена из текущего состояния (payload их не несёт)
+          const existing = prev.find(t => t.id === mapped.id);
+          const merged = existing
+            ? { ...mapped, projectName: mapped.projectName ?? existing.projectName, assigneeName: mapped.assigneeName ?? existing.assigneeName, authorName: mapped.authorName ?? existing.authorName }
+            : mapped;
+          const idx = prev.findIndex(t => t.id === merged.id);
+          if (idx === -1) return [merged, ...prev];
+          const copy = prev.slice(); copy[idx] = merged; return copy;
+        });
+        // точечный сигнал открытой карточке (через ref, чтобы не пересоздавать канал)
+        const rid = (payload.new && payload.new.id) || (payload.old && payload.old.id);
+        const open = editingRef.current;
+        if (open && open.id && rid === open.id) setOpenTaskTick(t => t + 1);
+      })
+      .subscribe();
+    return () => { client.removeChannel(channel); };
+  }, [client, canSeeRow]);
 
   const badge = (s) => TASK_STATUS_BADGE[s] || "bg-zinc-600";
 
@@ -3165,6 +3609,7 @@ function TasksView({ client, profile, projects, showToast }) {
          </table>
        </div>}
       {editing && <TaskModal task={editing} client={client} profile={profile} projects={projects}
+                             realtimeTick={openTaskTick}
                              onClose={() => setEditing(null)} onSaved={() => { setEditing(null); reload(); }}
                              showToast={showToast} />}
     </div>
@@ -5338,6 +5783,9 @@ function AdminPage({ profile, client, showToast }) {
   const [search, setSearch] = useState("");
   const [confirmDel, setConfirmDel] = useState(null);
   const [confirmText, setConfirmText] = useState("");
+  const [resetUser, setResetUser] = useState(null);   // пользователь для сброса пароля
+  const [resetPwd, setResetPwd] = useState("");
+  const [resetPwd2, setResetPwd2] = useState("");
 
   const reload = async () => {
     setLoading(true);
@@ -5388,6 +5836,19 @@ function AdminPage({ profile, client, showToast }) {
       setConfirmDel(null);
       setConfirmText("");
       reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    }
+  };
+
+  const doResetPassword = async () => {
+    if (!resetUser) return;
+    if (resetPwd.length < 8) { showToast("Пароль минимум 8 символов", "error"); return; }
+    if (resetPwd !== resetPwd2) { showToast("Пароли не совпадают", "error"); return; }
+    try {
+      await adminResetPassword(client, resetUser.id, resetPwd);
+      showToast(`Пароль для ${resetUser.email} сброшен`);
+      setResetUser(null); setResetPwd(""); setResetPwd2("");
     } catch (e) {
       showToast("Ошибка: " + (e.message || ""), "error");
     }
@@ -5516,6 +5977,19 @@ function AdminPage({ profile, client, showToast }) {
                         }}
                       >
                         <ShieldCheck size={13} strokeWidth={2.2} />
+                      </button>
+                      <button
+                        onClick={() => { setResetUser(u); setResetPwd(""); setResetPwd2(""); }}
+                        title="Сбросить пароль"
+                        style={{
+                          padding: 6, borderRadius: 6, cursor: "pointer", border: "1px solid",
+                          background: "rgba(255,255,255,0.04)", borderColor: "rgba(255,255,255,0.10)",
+                          color: "#a8a8a3", display: "flex",
+                        }}
+                        onMouseOver={e => { e.currentTarget.style.color = "#e8c860"; e.currentTarget.style.borderColor = "rgba(212,175,55,0.30)"; }}
+                        onMouseOut={e => { e.currentTarget.style.color = "#a8a8a3"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.10)"; }}
+                      >
+                        <KeyRound size={13} strokeWidth={2.2} />
                       </button>
                       <button
                         onClick={() => { setConfirmDel(u.id); setConfirmText(""); }}
@@ -5659,6 +6133,49 @@ function AdminPage({ profile, client, showToast }) {
           </Modal>
         );
       })()}
+
+      {resetUser && (
+        <Modal
+          title="Сбросить пароль"
+          onClose={() => { setResetUser(null); setResetPwd(""); setResetPwd2(""); }}
+          icon={<KeyRound size={16} />}
+          maxWidth={420}
+        >
+          <p style={{ fontSize: 13, color: "#a8a8a3", lineHeight: 1.55, marginTop: 0 }}>
+            Новый пароль для <b style={{ color: "#fafaf7" }}>{resetUser.email}</b>.
+            Передайте его пользователю — войдя, он сможет сменить пароль сам.
+          </p>
+          <Field label="Новый пароль (минимум 8 символов)">
+            <StyledInput
+              type="password"
+              value={resetPwd}
+              onChange={e => setResetPwd(e.target.value)}
+              placeholder="Новый пароль"
+              autoFocus
+            />
+          </Field>
+          <Field label="Повторите пароль">
+            <StyledInput
+              type="password"
+              value={resetPwd2}
+              onChange={e => setResetPwd2(e.target.value)}
+              placeholder="Ещё раз"
+              onKeyDown={e => { if (e.key === "Enter") doResetPassword(); }}
+            />
+          </Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button onClick={() => { setResetUser(null); setResetPwd(""); setResetPwd2(""); }} className={BTN.ghost} style={{ flex: 1 }}>Отмена</button>
+            <button
+              onClick={doResetPassword}
+              disabled={resetPwd.length < 8 || resetPwd !== resetPwd2}
+              className={BTN.primary}
+              style={{ flex: 2, opacity: (resetPwd.length >= 8 && resetPwd === resetPwd2) ? 1 : 0.5 }}
+            >
+              Сбросить пароль
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -6382,7 +6899,7 @@ export default function App() {
               color: "#62646b",
               fontWeight: 400,
               fontSize: 13,
-            }}>· рабочий центр</span>
+            }}>· Искусство климата, инженерия комфорта</span>
           </h1>
           <div style={{
             fontSize: 11,
