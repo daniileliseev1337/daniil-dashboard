@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory, receivables, myTasks } from './dashboardMetrics.js';
+import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory, receivables, myTasks, shareToAmount, ownerShareAmount, proportionReceived, ownerReceived, mySharesTotals } from './dashboardMetrics.js';
 
 const NOW = new Date('2026-06-06T12:00:00');
 
@@ -185,5 +185,91 @@ describe('myTasks', () => {
     expect(ids).not.toContain(4);
     expect(ids).not.toContain(5);
     expect(ids).not.toContain(6);
+  });
+});
+
+describe('shareToAmount', () => {
+  it('percent: 30% от 100000 = 30000', () => {
+    expect(shareToAmount({ shareKind: 'percent', shareValue: 30 }, 100000)).toBe(30000);
+  });
+  it('amount: фиксированная сумма возвращается как есть', () => {
+    expect(shareToAmount({ shareKind: 'amount', shareValue: 40000 }, 100000)).toBe(40000);
+  });
+  it('percent от нулевого договора = 0', () => {
+    expect(shareToAmount({ shareKind: 'percent', shareValue: 50 }, 0)).toBe(0);
+  });
+});
+
+describe('ownerShareAmount (остаток владельца)', () => {
+  const p = { contractSum: 100000 };
+  it('нет долей других → вся сумма договора', () => {
+    expect(ownerShareAmount(p, [])).toBe(100000);
+  });
+  it('один участник 30% → остаток 70000', () => {
+    expect(ownerShareAmount(p, [{ shareKind: 'percent', shareValue: 30 }])).toBe(70000);
+  });
+  it('смешанно % и сумма: 30% + 20000 → остаток 50000', () => {
+    expect(ownerShareAmount(p, [
+      { shareKind: 'percent', shareValue: 30 },
+      { shareKind: 'amount', shareValue: 20000 },
+    ])).toBe(50000);
+  });
+  it('перерасход долей > договора → остаток не ниже 0', () => {
+    expect(ownerShareAmount(p, [{ shareKind: 'amount', shareValue: 150000 }])).toBe(0);
+  });
+});
+
+describe('proportionReceived', () => {
+  it('оплачено 40% договора → по доле 70000 получено 28000', () => {
+    expect(proportionReceived(40000, 70000, 100000)).toBe(28000);
+  });
+  it('договор 0 → 0 (без деления на ноль)', () => {
+    expect(proportionReceived(0, 50000, 0)).toBe(0);
+  });
+  it('полностью оплачено → получено = вся доля', () => {
+    expect(proportionReceived(100000, 70000, 100000)).toBe(70000);
+  });
+});
+
+describe('ownerReceived', () => {
+  const projects = [
+    { id: 'p1', stage: 'В работе', contractSum: 100000, paidAmount: 40000 },
+    { id: 'p2', stage: 'В работе', contractSum: 50000,  paidAmount: 50000 },
+    { id: 'p3', stage: 'Архив',    contractSum: 80000,  paidAmount: 80000 },
+  ];
+  const sharesByProject = { p1: [{ shareKind: 'percent', shareValue: 30 }] };
+  it('сумма полученного по моим долям, архив исключён', () => {
+    expect(ownerReceived(projects, sharesByProject)).toBe(28000 + 50000);
+  });
+  it('без долей (старое поведение) = сумма paidAmount неархивных', () => {
+    expect(ownerReceived(projects, {})).toBe(40000 + 50000);
+  });
+});
+
+describe('receivables с долями', () => {
+  const projects = [
+    { id: 'p1', name: 'A', stage: 'В работе', contractSum: 100000, paidAmount: 40000 },
+  ];
+  it('доля другого 30% → моя 70000, получено 28000, остаток 42000', () => {
+    const r = receivables(projects, { p1: [{ shareKind: 'percent', shareValue: 30 }] });
+    expect(r.total).toBe(42000);
+    expect(r.items[0]).toEqual({ id: 'p1', name: 'A', remaining: 42000 });
+  });
+  it('обратная совместимость: без 2-го аргумента = договор − оплачено', () => {
+    const r = receivables(projects);
+    expect(r.total).toBe(60000);
+  });
+});
+
+describe('mySharesTotals', () => {
+  it('суммирует my_received и my_receivable из get_my_shares', () => {
+    const myShares = [
+      { projectName: 'X', myAmount: 30000, myReceived: 12000, myReceivable: 18000 },
+      { projectName: 'Y', myAmount: 50000, myReceived: 50000, myReceivable: 0 },
+    ];
+    expect(mySharesTotals(myShares)).toEqual({ received: 62000, receivable: 18000 });
+  });
+  it('пустой список → нули', () => {
+    expect(mySharesTotals([])).toEqual({ received: 0, receivable: 0 });
   });
 });
