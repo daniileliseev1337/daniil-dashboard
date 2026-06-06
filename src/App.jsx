@@ -618,19 +618,6 @@ async function fetchProfile(client, userId) {
   return data;
 }
 
-// ── v2.0: Telegram-функции ────────────────────────────────────────────────
-
-async function generateTelegramLinkCode(client) {
-  const { data, error } = await client.rpc("generate_telegram_link_code");
-  if (error) throw error;
-  return data; // строка — 8-символьный код
-}
-
-async function unlinkTelegram(client) {
-  const { error } = await client.rpc("unlink_telegram");
-  if (error) throw error;
-}
-
 async function updateNotificationSettings(client, settings) {
   const { error } = await client.rpc("update_notification_settings", {
     p_project_taken: settings.notifProjectTaken,
@@ -5518,11 +5505,6 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
   const [name, setSaveName]      = useState(profile?.name || "");
   const [saving, setSaving]      = useState(false);
 
-  // Telegram state
-  const [linkCode, setLinkCode]  = useState(null);
-  const [genLoading, setGenLoad] = useState(false);
-  const [unlinking, setUnlink]   = useState(false);
-
   // Notification settings — initialise from profile
   const [notifs, setNotifs] = useState({
     notifProjectTaken: profile?.notif_project_taken !== false,
@@ -5549,8 +5531,6 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     finally { setPushBusy(false); }
   };
 
-  const isLinked = !!profile?.telegram_chat_id;
-
   const save = async () => {
     setSaving(true);
     try {
@@ -5568,31 +5548,6 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
       showToast("Ошибка: " + (e.message || ""), "error");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const generateCode = async () => {
-    setGenLoad(true);
-    try {
-      const code = await generateTelegramLinkCode(client);
-      setLinkCode(code);
-    } catch (e) {
-      showToast("Ошибка: " + (e.message || ""), "error");
-    } finally {
-      setGenLoad(false);
-    }
-  };
-
-  const doUnlink = async () => {
-    setUnlink(true);
-    try {
-      await unlinkTelegram(client);
-      onProfileUpdated({ ...profile, telegram_chat_id: null });
-      showToast("Telegram отвязан");
-    } catch (e) {
-      showToast("Ошибка: " + (e.message || ""), "error");
-    } finally {
-      setUnlink(false);
     }
   };
 
@@ -5694,89 +5649,6 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
       </Field>
       <div style={{ fontSize: 11, color: "#6b6b67", marginBottom: 16, lineHeight: 1.5 }}>
         Это имя видят другие участники команды. Email и роль изменить нельзя.
-      </div>
-
-      {/* ── Telegram-привязка ─────────────────────────────────────────────── */}
-      <div style={{
-        marginBottom: 16, padding: "12px 14px", borderRadius: 10,
-        background: isLinked ? "rgba(110,231,168,0.04)" : "rgba(147,197,253,0.04)",
-        border: `1px solid ${isLinked ? "rgba(110,231,168,0.15)" : "rgba(147,197,253,0.15)"}`,
-      }}>
-        <div style={{
-          fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
-          textTransform: "uppercase", marginBottom: 10,
-          color: isLinked ? "#6ee7a8" : "#93c5fd",
-          display: "flex", alignItems: "center", gap: 6,
-        }}>
-          <Send size={11} strokeWidth={2.4} />
-          Telegram
-          {isLinked && <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— привязан ✓</span>}
-        </div>
-
-        {isLinked ? (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 12, color: "#a8a8a3" }}>
-              Уведомления настроены ниже
-            </span>
-            <button
-              onClick={doUnlink}
-              disabled={unlinking}
-              style={{
-                fontSize: 11, padding: "4px 10px", borderRadius: 6,
-                background: "rgba(248,163,163,0.08)", border: "1px solid rgba(248,163,163,0.25)",
-                color: "#f8a3a3", cursor: "pointer",
-              }}
-            >
-              {unlinking ? "…" : "Отвязать"}
-            </button>
-          </div>
-        ) : (
-          <>
-            {!linkCode ? (
-              <>
-                <p style={{ fontSize: 12, color: "#a8a8a3", margin: "0 0 10px", lineHeight: 1.5 }}>
-                  Привяжи Telegram чтобы получать уведомления о событиях в проектах.
-                </p>
-                <button
-                  onClick={generateCode}
-                  disabled={genLoading}
-                  className={BTN.primary}
-                  style={{ width: "100%", opacity: genLoading ? 0.6 : 1 }}
-                >
-                  {genLoading ? "Генерируем…" : "Привязать Telegram"}
-                </button>
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize: 12, color: "#a8a8a3", margin: "0 0 8px", lineHeight: 1.5 }}>
-                  Открой Telegram, найди бота <b>@daniilcoop_bot</b> и отправь ему:
-                </p>
-                <div style={{
-                  background: "#0a0a0a", borderRadius: 8, padding: "8px 12px",
-                  fontFamily: "ui-monospace, monospace", fontSize: 15,
-                  color: "#d4af37", letterSpacing: "0.15em", textAlign: "center",
-                  border: "1px solid rgba(212,175,55,0.25)",
-                  marginBottom: 8,
-                }}>
-                  /start {linkCode}
-                </div>
-                <p style={{ fontSize: 10, color: "#6b6b67", margin: 0 }}>
-                  Код действует 10 минут. После отправки страница обновится автоматически.
-                </p>
-                <button
-                  onClick={generateCode}
-                  style={{
-                    marginTop: 8, fontSize: 11, color: "#6b6b67",
-                    background: "none", border: "none", cursor: "pointer", padding: 0,
-                    textDecoration: "underline",
-                  }}
-                >
-                  Обновить код
-                </button>
-              </>
-            )}
-          </>
-        )}
       </div>
 
       {/* ── Push-уведомления (Web Push, этого устройства) ────────────────── */}
