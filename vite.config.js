@@ -1,8 +1,5 @@
-// Конфигурация Vite — современного быстрого сборщика для React-приложений.
-// Подключаем единственный плагин — поддержку JSX-синтаксиса React.
-// Никаких дополнительных настроек нам не нужно: Vite по умолчанию умеет
-// всё, что требуется для нашего проекта.
-import { defineConfig } from 'vite';
+/// <reference types="vitest/config" />
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -14,10 +11,14 @@ export default defineConfig({
       srcDir: 'src',
       filename: 'sw.js',
       registerType: 'autoUpdate',
-      injectRegister: null, // SW регистрируем вручную в App.jsx
-      manifest: false,      // используем статический public/manifest.webmanifest
+      injectRegister: null,
+      manifest: false,
       injectManifest: { swSrc: 'src/sw.js', swDest: 'dist/sw.js' },
       devOptions: { enabled: false },
     }),
   ],
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.js'],
+  },
 });
