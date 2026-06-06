@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
 import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
-import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks } from "./lib/dashboardMetrics";
+import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals } from "./lib/dashboardMetrics";
 import NotificationBell from "./components/NotificationBell";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -2312,6 +2312,26 @@ function ReceivablesCard({ data }) {
   );
 }
 
+function MySharesCard({ shares }) {
+  if (!shares || !shares.length) return null;
+  const totalReceived = shares.reduce((s, x) => s + (x.myReceived || 0), 0);
+  const top = [...shares].sort((a, b) => b.myReceivable - a.myReceivable).slice(0, 5);
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionTitle icon={<Wallet size={13} />}>Мои доли в проектах</SectionTitle>
+        <span style={{ color: "#6ee7a8", fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmt(totalReceived)}</span>
+      </div>
+      {top.map((it, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+          <span style={{ color: "#cdced4", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.projectName}</span>
+          <span style={{ color: "#e8c860", flexShrink: 0, marginLeft: 8, fontVariantNumeric: "tabular-nums" }}>{fmt(it.myReceived)} / {fmt(it.myAmount)}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 const EXP_COLORS = ["#d4af37", "#93c5fd", "#f8a3a3", "#6ee7a8", "#b794f6", "#6b6b67"];
 
 function ExpenseByCategoryCard({ data, tt }) {
@@ -2380,7 +2400,7 @@ function MyTasksCard({ data }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ projects, txs, tasks, onDrillStage }) {
+function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [] }) {
   const [period, setPeriod] = useState("month");
   const range = periodRange(period);
   const prevRange = prevPeriodRange(period);
@@ -2397,7 +2417,10 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
 
   const series = financeSeries(txs, range, gran);
   const expCats = expenseByCategory(txs, range);
-  const debt = receivables(projects);
+  const debt = receivables(projects, sharesByProject);
+  const sharesTot = mySharesTotals(myShares);
+  const myReceived = ownerReceived(projects, sharesByProject) + sharesTot.received;
+  const debtTotal = debt.total + sharesTot.receivable;
   const today = todayStr();
   const myT = myTasks(tasks || [], today);
 
@@ -2442,7 +2465,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
           <KpiCard label="Активных проектов" value={active.length} Icon={FolderKanban} color="#d4af37" sub={`всего: ${projects.length}`} />
         </div>
         <KpiCard label="Портфель" value={totalContract} Icon={Briefcase} color="#d4af37" format={fmt} />
-        <KpiCard label="Получено" value={totalPaid} Icon={BadgeCheck} color="#6ee7a8" format={fmt} sub={`осталось: ${fmt(totalContract - totalPaid)}`} />
+        <KpiCard label="Получено" value={myReceived} Icon={BadgeCheck} color="#6ee7a8" format={fmt} sub={`жду: ${fmt(debtTotal)}`} />
         <KpiCard label="Баланс за период" value={bal.balance} Icon={Wallet} color={bal.balance >= 0 ? "#6ee7a8" : "#f8a3a3"} format={fmt} sub={`доходы ${fmt(bal.income)}`} trend={balanceTrend} />
       </motion.div>
 
@@ -2488,6 +2511,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
           <ExpenseByCategoryCard data={expCats} tt={tt} />
         </div>
         <ReceivablesCard data={debt} />
+        <MySharesCard shares={myShares} />
       </motion.div>
 
       {/* ЗОНА: Проекты */}
