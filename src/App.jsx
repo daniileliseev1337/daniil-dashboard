@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
+import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -639,15 +640,15 @@ async function updateNotificationSettings(client, settings) {
   if (error) throw error;
 }
 
-// Отправка Telegram-уведомления через Edge Function.
+// Отправка Web Push уведомления через Edge Function (заменяет Telegram-канал).
 // Ошибки подавляются — уведомления best-effort.
-async function sendTelegramNotify(client, type, recipientId, data = {}) {
+async function sendPush(client, type, recipientId, data = {}) {
   try {
-    await client.functions.invoke("telegram-notify", {
+    await client.functions.invoke("web-push-notify", {
       body: { type, recipientId, ...data },
     });
   } catch (e) {
-    console.warn("Telegram notify failed:", e);
+    console.warn("Push notify failed:", e);
   }
 }
 
@@ -675,7 +676,7 @@ async function deleteTask(client, id) {
 }
 async function notifyTask(client, type, taskId, initiatorId) {
   try {
-    await client.functions.invoke("telegram-notify", { body: { type, taskId, initiatorId } });
+    await client.functions.invoke("web-push-notify", { body: { type, taskId, initiatorId } });
   } catch (e) { console.warn("task notify failed:", e); }
 }
 
@@ -2306,7 +2307,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       if (form.executorUserId) {
         const prevExecutorId = modal !== "add" ? modal?.executorUserId : null;
         if (form.executorUserId !== prevExecutorId) {
-          sendTelegramNotify(client, "team_invite", form.executorUserId, {
+          sendPush(client, "team_invite", form.executorUserId, {
             projectName: saved?.name || form.name,
             actorName: profile?.name || profile?.email,
             customText: "Тебя назначили исполнителем проекта",
@@ -2580,6 +2581,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                                 await revokeProject(client,p.id);
                                 setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
                                 showToast("Проект возвращён в маркетплейс");
+                                sendPush(client,"project_published",null,{ownerId:p.ownerId,initiatorId:p.ownerId,projectId:p.id});
                               }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
                             }}
                             style={{
@@ -2601,6 +2603,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                             await releaseProject(client,p.id);
                             setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
                             showToast("Проект возвращён в маркетплейс");
+                            sendPush(client,"project_published",null,{ownerId:p.ownerId,initiatorId:p.ownerId,projectId:p.id});
                           }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
                         }}
                         style={{
@@ -2626,7 +2629,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                             setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:profile?.id,stage:"В работе",executor:executorName}:x));
                             showToast("✓ Проект взят в работу");
                             // Уведомление владельцу проекта
-                            sendTelegramNotify(client,"project_taken",p.ownerId,{
+                            sendPush(client,"project_taken",p.ownerId,{
                               projectName:p.name,
                               actorName:profile?.name||profile?.email,
                             });
@@ -4329,7 +4332,7 @@ function CommentsSection({ projectId, profile, client, showToast, isOwner }) {
       setText("");
       await reload();
       // Уведомление всем участникам проекта (best-effort, через Edge Function)
-      sendTelegramNotify(client, "comment", null, {
+      sendPush(client, "comment", null, {
         projectId,
         commentText: trimmed,
         actorName: profile?.name || profile?.email,
@@ -4914,7 +4917,7 @@ function MembersManager({ projectId, profile, client, showToast, canManage }) {
       await addProjectMember(client, projectId, selectedUser.id, selectedRole);
       showToast(`✓ ${selectedUser.name || selectedUser.email} приглашён(а)`);
       // Уведомление приглашённому пользователю
-      sendTelegramNotify(client, "team_invite", selectedUser.id, {
+      sendPush(client, "team_invite", selectedUser.id, {
         projectName: "(проект)",
         actorName: profile?.name || profile?.email,
       });
@@ -5514,8 +5517,24 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     notifComment:      profile?.notif_comment        !== false,
     notifDeadline:     profile?.notif_deadline       !== false,
     notifTask:         profile?.notif_task           !== false,
+    notifNewProject:   profile?.notif_new_project    !== false,
   });
   const [savingNotifs, setSavingNotifs] = useState(false);
+
+  // Web Push (этого устройства)
+  const [pushState, setPushState] = useState({ supported: false, subscribed: false, permission: "default" });
+  const [pushBusy, setPushBusy] = useState(false);
+  useEffect(() => { getPushState().then(setPushState).catch(() => {}); }, []);
+  const isIOSNonPWA = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone;
+  const togglePush = async () => {
+    setPushBusy(true);
+    try {
+      if (pushState.subscribed) { await disablePush(client); showToast("Push выключен на этом устройстве"); }
+      else { await enablePush(client); showToast("✓ Push включён на этом устройстве"); }
+      setPushState(await getPushState());
+    } catch (e) { showToast("Ошибка push: " + (e.message || ""), "error"); }
+    finally { setPushBusy(false); }
+  };
 
   const isLinked = !!profile?.telegram_chat_id;
 
@@ -5568,12 +5587,15 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     setSavingNotifs(true);
     try {
       await updateNotificationSettings(client, updated);
+      // notif_new_project нет в RPC — пишем прямым update под RLS
+      await client.from("profiles").update({ notif_new_project: updated.notifNewProject }).eq("id", profile.id);
       onProfileUpdated({ ...profile,
         notif_project_taken: updated.notifProjectTaken,
         notif_team_invite:   updated.notifTeamInvite,
         notif_comment:       updated.notifComment,
         notif_deadline:      updated.notifDeadline,
         notif_task:          updated.notifTask,
+        notif_new_project:   updated.notifNewProject,
       });
     } catch (e) {
       showToast("Ошибка сохранения настроек: " + (e.message || ""), "error");
@@ -5744,22 +5766,61 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
         )}
       </div>
 
-      {/* ── Настройки уведомлений (только если привязан) ─────────────────── */}
-      {isLinked && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{
-            fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
-            textTransform: "uppercase", marginBottom: 8, color: "#6b6b67",
-          }}>
-            Уведомления
-          </div>
-          <NotifToggle label="Кто-то взял мой проект из маркетплейса"    notifKey="notifProjectTaken" />
-          <NotifToggle label="Меня пригласили в команду проекта"          notifKey="notifTeamInvite" />
-          <NotifToggle label="Новый комментарий в проекте"                notifKey="notifComment" />
-          <NotifToggle label="До дедлайна проекта осталось 3 дня"         notifKey="notifDeadline" />
-          <NotifToggle label="Уведомления о задачах"                      notifKey="notifTask" />
+      {/* ── Push-уведомления (Web Push, этого устройства) ────────────────── */}
+      <div style={{
+        marginBottom: 16, padding: "12px 14px", borderRadius: 10,
+        background: "rgba(147,197,253,0.04)", border: "1px solid rgba(147,197,253,0.15)",
+      }}>
+        <div style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
+          textTransform: "uppercase", marginBottom: 10, color: "#93c5fd",
+        }}>
+          Push-уведомления
         </div>
-      )}
+        {!pushState.supported ? (
+          <p style={{ fontSize: 12, color: "#a8a8a3", margin: 0, lineHeight: 1.5 }}>
+            {isIOSNonPWA
+              ? "На iPhone push работает только из приложения, установленного через Safari (Opera, Chrome и др. не подойдут — ограничение Apple). Откройте этот сайт в Safari → нажмите «Поделиться» (квадрат со стрелкой ↑ внизу экрана) → пролистайте меню вниз до пункта «На экран Домой» → «Добавить». Затем откройте КЛИМАТ-ПРО с домашнего экрана (как отдельное приложение) и включите push здесь."
+              : "Этот браузер не поддерживает push-уведомления."}
+          </p>
+        ) : pushState.permission === "denied" ? (
+          <p style={{ fontSize: 12, color: "#f8a3a3", margin: 0, lineHeight: 1.5 }}>
+            Уведомления заблокированы в настройках браузера для этого сайта — разрешите их, чтобы включить push.
+          </p>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: 12, color: "#a8a8a3" }}>
+              {pushState.subscribed ? "Включены на этом устройстве" : "Получать уведомления на этом устройстве"}
+            </span>
+            <button onClick={togglePush} disabled={pushBusy} style={{
+              width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
+              transition: "all 0.2s", padding: 0,
+              background: pushState.subscribed ? "#d4af37" : "rgba(255,255,255,0.10)", position: "relative",
+            }}>
+              <span style={{
+                position: "absolute", top: 2, left: pushState.subscribed ? 18 : 2,
+                width: 16, height: 16, borderRadius: "50%", background: "#fafaf7", transition: "left 0.2s",
+              }} />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Типы уведомлений ─────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: "0.10em",
+          textTransform: "uppercase", marginBottom: 8, color: "#6b6b67",
+        }}>
+          Какие уведомления получать
+        </div>
+        <NotifToggle label="Новый проект в поиске исполнителя"           notifKey="notifNewProject" />
+        <NotifToggle label="Кто-то взял мой проект из маркетплейса"      notifKey="notifProjectTaken" />
+        <NotifToggle label="Меня пригласили в команду проекта"          notifKey="notifTeamInvite" />
+        <NotifToggle label="Комментарий / вопрос по задаче"             notifKey="notifComment" />
+        <NotifToggle label="Приближается дедлайн"                       notifKey="notifDeadline" />
+        <NotifToggle label="Уведомления о задачах"                      notifKey="notifTask" />
+      </div>
 
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Закрыть</button>
@@ -6636,6 +6697,13 @@ export default function App() {
   const [phase, setPhase] = useState("loading");
   const [errorMsg, setErrorMsg] = useState("");
   const isMobile = useIsMobile();
+
+  // Регистрация service worker (канал Web Push). vite-plugin-pwa отдаёт /sw.js.
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch((e) => console.warn("SW reg failed", e));
+    }
+  }, []);
 
   const [user, setUser]       = useState(null);
   const [profile, setProfile] = useState(null);

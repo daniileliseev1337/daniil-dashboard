@@ -1,0 +1,4 @@
+{
+  "subject": "mailto:CHANGE_ME@example.com",
+  "vapidKeys": { "publicKey": "", "privateKey": "" }
+}
