@@ -1521,7 +1521,17 @@ function AuthScreen({ onAuthenticated, onError }) {
 // PROJECT FORM
 // ════════════════════════════════════════════════════════════════════════════
 function ProjectForm({ initial, onSave, onClose, saving, client, profile, showToast, isOwner }) {
-  const [f, setF] = useState(initial || {
+  const [f, setF] = useState(initial ? {
+    ...initial,
+    shares: (initial.shares || []).map(s => ({
+      participantUserId: s.participantUserId || null,
+      participantClientId: s.participantClientId || null,
+      participantName: s.participantName || "",
+      label: s.participantName || s._label || "участник",
+      shareKind: s.shareKind || "percent",
+      shareValue: s.shareValue ?? "",
+    })),
+  } : {
     name: "", client: "", executor: "", type: "ОВиК", stage: "Переговоры",
     startDate: todayStr(), deadline: "", contractSum: "", paidAmount: "", notes: "",
     visibility: "private",
@@ -1533,6 +1543,8 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     // v2.0 поля
     visibilityUsers: [], // для режима selected: [{id, email, name}]
     executorUserId: null, // UUID исполнителя для Telegram-уведомления
+    // v2.1 поля
+    shares: [],
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -1588,6 +1600,31 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     setExecQuery("");
     setExecResults([]);
   };
+
+  // v2.1: автокомплит участника доли
+  const [shareUserQuery, setShareUserQuery] = useState("");
+  const [shareUserResults, setShareUserResults] = useState([]);
+  const [shareExtName, setShareExtName] = useState("");
+
+  useEffect(() => {
+    if (!client || !shareUserQuery.trim()) { setShareUserResults([]); return; }
+    const t = setTimeout(async () => {
+      const res = await searchApprovedUsers(client, shareUserQuery);
+      setShareUserResults(res);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [shareUserQuery]); // eslint-disable-line
+
+  const addShare = (part) => setF(p => ({ ...p, shares: [...(p.shares || []), {
+    participantUserId: part.userId || null,
+    participantClientId: part.clientId || null,
+    participantName: part.name && !part.userId && !part.clientId ? part.name : "",
+    label: part.name || "участник",
+    shareKind: "percent", shareValue: "",
+  }] }));
+  const updateShare = (i, patch) => setF(p => ({ ...p, shares: p.shares.map((s, j) => j === i ? { ...s, ...patch } : s) }));
+  const removeShare = (i) => setF(p => ({ ...p, shares: p.shares.filter((_, j) => j !== i) }));
+
   // редактирование отдельных полей конкретной записи
   const addLink = () => {
     setF(p => ({ ...p, links: [...(p.links || []), { title: "", url: "" }] }));
@@ -1674,7 +1711,17 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         </div>
         <div>
           <Label>Стадия</Label>
-          <StyledSelect value={f.stage} onChange={e => s("stage", e.target.value)}>
+          <StyledSelect value={f.stage} onChange={e => {
+            const v = e.target.value;
+            setF(p => {
+              const next = { ...p, stage: v };
+              if (v === "Оплачен") {
+                const c = Number(p.contractSum) || 0, paid = Number(p.paidAmount) || 0;
+                if (c > 0 && paid < c) next.paidAmount = c;
+              }
+              return next;
+            });
+          }}>
             {PROJECT_STAGES.map(t => <option key={t}>{t}</option>)}
           </StyledSelect>
         </div>
@@ -1691,6 +1738,175 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         <div><Label>Оплачено факт (₽)</Label>
           <StyledInput type="number" value={f.paidAmount} onChange={e => s("paidAmount", e.target.value)} placeholder="0" /></div>
       </div>
+
+      {/* ═══ НОВАЯ СЕКЦИЯ: Доли участников (v2.1) ═══ */}
+      {(() => {
+        const contractNum = Number(f.contractSum) || 0;
+        const othersSum = (f.shares || []).reduce((acc, sh) => acc + (sh.shareKind === "amount"
+          ? Number(sh.shareValue) || 0
+          : contractNum * (Number(sh.shareValue) || 0) / 100), 0);
+        const myRemainder = Math.max(0, contractNum - othersSum);
+        return (
+          <div style={{
+            marginBottom: 14, padding: "12px 14px",
+            background: "rgba(212,175,55,0.04)",
+            border: "1px solid rgba(212,175,55,0.12)",
+            borderRadius: 10,
+          }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              fontSize: 11, fontWeight: 600, color: "#d4af37",
+              textTransform: "uppercase", letterSpacing: "0.10em",
+              marginBottom: 12,
+            }}>
+              <Users size={12} strokeWidth={2.4} />
+              Доли участников
+            </div>
+
+            {/* Список добавленных долей */}
+            {(f.shares || []).length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {(f.shares || []).map((sh, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 28px", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#fafaf7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sh.label}</span>
+                    <StyledInput
+                      type="number"
+                      value={sh.shareValue}
+                      onChange={e => updateShare(i, { shareValue: e.target.value })}
+                      placeholder="0"
+                      style={{ fontSize: 12, padding: "6px 10px" }}
+                    />
+                    <StyledSelect
+                      value={sh.shareKind}
+                      onChange={e => updateShare(i, { shareKind: e.target.value })}
+                      style={{ fontSize: 12, padding: "6px 8px" }}
+                    >
+                      <option value="percent">%</option>
+                      <option value="amount">₽</option>
+                    </StyledSelect>
+                    <button
+                      type="button"
+                      onClick={() => removeShare(i)}
+                      style={{
+                        background: "transparent", border: "none", color: "#6b6b67",
+                        cursor: "pointer", padding: 4,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "color 0.18s",
+                      }}
+                      onMouseOver={e => e.currentTarget.style.color = "#f8a3a3"}
+                      onMouseOut={e => e.currentTarget.style.color = "#6b6b67"}
+                      title="Удалить долю"
+                    >
+                      <Trash2 size={14} strokeWidth={2} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Индикатор остатка */}
+            {contractNum > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                {othersSum > contractNum ? (
+                  <div style={{ fontSize: 11, color: "#f8a3a3", fontWeight: 500 }}>
+                    ⚠ Доли превышают сумму договора
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: "#a8a8a3" }}>
+                    Твоя доля (остаток): <span style={{ color: "#d4af37", fontWeight: 600 }}>{fmt(myRemainder)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Добавить: юзер-автокомплит */}
+            <div style={{ marginBottom: 8 }}>
+              <Label>Добавить пользователя системы</Label>
+              <div style={{ position: "relative" }}>
+                <StyledInput
+                  value={shareUserQuery}
+                  onChange={e => setShareUserQuery(e.target.value)}
+                  onBlur={() => setTimeout(() => setShareUserResults([]), 200)}
+                  placeholder="Поиск по имени или email…"
+                  style={{ fontSize: 12 }}
+                />
+                {shareUserResults.length > 0 && (
+                  <div style={{
+                    position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                    background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 8, overflow: "hidden", marginTop: 2,
+                  }}>
+                    {shareUserResults.map(u => (
+                      <div key={u.id}
+                        onMouseDown={() => {
+                          addShare({ userId: u.id, name: u.name || u.email });
+                          setShareUserQuery("");
+                          setShareUserResults([]);
+                        }}
+                        style={{
+                          padding: "8px 12px", cursor: "pointer", fontSize: 12,
+                          borderBottom: "1px solid rgba(255,255,255,0.06)",
+                          display: "flex", alignItems: "center", gap: 8,
+                        }}
+                        onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.10)"}
+                        onMouseOut={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                        {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
+                        <Send size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Добавить: текущий заказчик */}
+            {f.clientId && f.client && (
+              <div style={{ marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => addShare({ clientId: f.clientId, name: f.client })}
+                  style={{
+                    fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer", fontWeight: 500,
+                    background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.30)",
+                    color: "#d4af37", display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit",
+                  }}
+                >
+                  <Plus size={11} strokeWidth={2.4} /> + заказчик ({f.client})
+                </button>
+              </div>
+            )}
+
+            {/* Добавить: внешний участник */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <StyledInput
+                value={shareExtName}
+                onChange={e => setShareExtName(e.target.value)}
+                placeholder="Внешний участник (имя)"
+                style={{ fontSize: 12, flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (shareExtName.trim()) {
+                    addShare({ name: shareExtName.trim() });
+                    setShareExtName("");
+                  }
+                }}
+                style={{
+                  fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer", fontWeight: 500,
+                  background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.30)",
+                  color: "#d4af37", display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Plus size={11} strokeWidth={2.4} /> добавить
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ НОВАЯ СЕКЦИЯ: Контакты заказчика ═══ */}
       <div style={{
@@ -2314,7 +2530,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECTS — список + CRUD через Supabase
 // ════════════════════════════════════════════════════════════════════════════
-function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные" }) {
+function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные", sharesByProject, setSharesByProject }) {
   const [modal, setModal]             = useState(null);
   const [stageFilter, setStageFilter] = useState(initialStageFilter);
   const [confirmDel, setConfirmDel]   = useState(null);
@@ -2347,6 +2563,30 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
             actorName: profile?.name || profile?.email,
             customText: "Тебя назначили исполнителем проекта",
           });
+        }
+      }
+      // v2.1: сохраняем доли участников (replace-all)
+      if (saved?.id) {
+        const projectId = saved.id;
+        await client.from("project_shares").delete().eq("project_id", projectId);
+        const shareRows = (form.shares || [])
+          .filter(sh => (Number(sh.shareValue) || 0) > 0 && (sh.participantUserId || sh.participantClientId || sh.participantName))
+          .map(sh => ({
+            project_id: projectId,
+            participant_user_id: sh.participantUserId || null,
+            participant_client_id: sh.participantClientId || null,
+            participant_name: (!sh.participantUserId && !sh.participantClientId) ? (sh.participantName || sh.label || null) : null,
+            share_kind: sh.shareKind === "amount" ? "amount" : "percent",
+            share_value: Number(sh.shareValue) || 0,
+          }));
+        if (shareRows.length) {
+          const { error: shErr } = await client.from("project_shares").insert(shareRows);
+          if (shErr) throw shErr;
+        }
+        // Обновляем кэш долей
+        if (setSharesByProject) {
+          const freshShares = await fetchProjectShares(client);
+          setSharesByProject(freshShares);
         }
       }
       setModal(null);
@@ -2691,7 +2931,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       {modal&&(
         <Modal title={modal==="add"?"Новый проект":"Редактировать проект"} onClose={()=>!saving&&setModal(null)}>
           <ProjectForm
-            initial={modal === "add" ? null : modal}
+            initial={modal === "add" ? null : { ...modal, shares: (sharesByProject || {})[modal.id] || [] }}
             onSave={saveProject}
             onClose={() => setModal(null)}
             saving={saving}
@@ -7051,7 +7291,7 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
             {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} />}
-            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} />}
+            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
