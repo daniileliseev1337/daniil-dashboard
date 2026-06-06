@@ -2581,6 +2581,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                                 await revokeProject(client,p.id);
                                 setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
                                 showToast("Проект возвращён в маркетплейс");
+                                sendPush(client,"project_published",null,{ownerId:p.ownerId,initiatorId:p.ownerId,projectId:p.id});
                               }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
                             }}
                             style={{
@@ -2602,6 +2603,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                             await releaseProject(client,p.id);
                             setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:null,stage:"Поиск исполнителя"}:x));
                             showToast("Проект возвращён в маркетплейс");
+                            sendPush(client,"project_published",null,{ownerId:p.ownerId,initiatorId:p.ownerId,projectId:p.id});
                           }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
                         }}
                         style={{
