@@ -283,6 +283,7 @@ function shareDbToJs(row) {
     participantUserId: row.participant_user_id || null,
     participantClientId: row.participant_client_id || null,
     participantName:   row.participant_name || "",
+    participantLabel:  row.participant_label || "",
     shareKind:         row.share_kind === "amount" ? "amount" : "percent",
     shareValue:        row.share_value != null ? Number(row.share_value) : 0,
     note:              row.note || "",
@@ -1527,7 +1528,7 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
       participantUserId: s.participantUserId || null,
       participantClientId: s.participantClientId || null,
       participantName: s.participantName || "",
-      label: s.participantName || s._label || "участник",
+      label: s.participantName || s.participantLabel || "участник",
       shareKind: s.shareKind || "percent",
       shareValue: s.shareValue ?? "",
     })),
@@ -2400,7 +2401,7 @@ function MyTasksCard({ data }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [] }) {
+function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [], ownerId = null }) {
   const [period, setPeriod] = useState("month");
   const range = periodRange(period);
   const prevRange = prevPeriodRange(period);
@@ -2417,9 +2418,9 @@ function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, m
 
   const series = financeSeries(txs, range, gran);
   const expCats = expenseByCategory(txs, range);
-  const debt = receivables(projects, sharesByProject);
+  const debt = receivables(projects, sharesByProject, ownerId);
   const sharesTot = mySharesTotals(myShares);
-  const myReceived = ownerReceived(projects, sharesByProject) + sharesTot.received;
+  const myReceived = ownerReceived(projects, sharesByProject, ownerId) + sharesTot.received;
   const debtTotal = debt.total + sharesTot.receivable;
   const today = todayStr();
   const myT = myTasks(tasks || [], today);
@@ -2589,24 +2590,21 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
           });
         }
       }
-      // v2.1: сохраняем доли участников (replace-all)
+      // v2.1: сохраняем доли участников атомарно через RPC (delete+insert в одной транзакции)
       if (saved?.id) {
         const projectId = saved.id;
-        await client.from("project_shares").delete().eq("project_id", projectId);
         const shareRows = (form.shares || [])
           .filter(sh => (Number(sh.shareValue) || 0) > 0 && (sh.participantUserId || sh.participantClientId || sh.participantName))
           .map(sh => ({
-            project_id: projectId,
             participant_user_id: sh.participantUserId || null,
             participant_client_id: sh.participantClientId || null,
             participant_name: (!sh.participantUserId && !sh.participantClientId) ? (sh.participantName || sh.label || null) : null,
+            participant_label: sh.label || null,
             share_kind: sh.shareKind === "amount" ? "amount" : "percent",
             share_value: Number(sh.shareValue) || 0,
           }));
-        if (shareRows.length) {
-          const { error: shErr } = await client.from("project_shares").insert(shareRows);
-          if (shErr) throw shErr;
-        }
+        const { error: shErr } = await client.rpc("set_project_shares", { p_project_id: projectId, p_rows: shareRows });
+        if (shErr) throw shErr;
         // Обновляем кэш долей
         if (setSharesByProject) {
           const freshShares = await fetchProjectShares(client);
@@ -7330,7 +7328,7 @@ export default function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
-            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} />}
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} ownerId={profile.id} />}
             {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}

@@ -161,20 +161,22 @@ export function proportionReceived(paidAmount, amount, contractSum) {
 }
 
 // KPI «Получено» владельца: сумма полученного по ЕГО доле в своих проектах (архив исключён).
-export function ownerReceived(projects, sharesByProject = {}) {
+export function ownerReceived(projects, sharesByProject = {}, ownerId = null) {
   let total = 0;
   for (const p of projects) {
     if (p.stage === 'Архив') continue;
+    if (ownerId != null && p.ownerId !== ownerId) continue;
     const amount = ownerShareAmount(p, sharesByProject[p.id] || []);
     total += proportionReceived(p.paidAmount, amount, p.contractSum);
   }
   return total;
 }
 
-export function receivables(projects, sharesByProject = {}) {
+export function receivables(projects, sharesByProject = {}, ownerId = null) {
   const items = [];
   for (const p of projects) {
     if (p.stage === 'Архив') continue;
+    if (ownerId != null && p.ownerId !== ownerId) continue;
     const amount = ownerShareAmount(p, sharesByProject[p.id] || []);
     const received = proportionReceived(p.paidAmount, amount, p.contractSum);
     const remaining = amount - received;

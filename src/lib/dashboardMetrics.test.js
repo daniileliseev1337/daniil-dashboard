@@ -273,3 +273,24 @@ describe('mySharesTotals', () => {
     expect(mySharesTotals([])).toEqual({ received: 0, receivable: 0 });
   });
 });
+
+describe('ownerId-фильтр (C1: не считать чужие проекты)', () => {
+  const projects = [
+    { id: 'p1', stage: 'В работе', contractSum: 100000, paidAmount: 100000, ownerId: 'me' },
+    { id: 'p2', stage: 'В работе', contractSum: 50000,  paidAmount: 50000,  ownerId: 'other' },
+  ];
+  it('ownerReceived с ownerId считает только свои', () => {
+    expect(ownerReceived(projects, {}, 'me')).toBe(100000);
+  });
+  it('ownerReceived без ownerId (обратная совместимость) считает все', () => {
+    expect(ownerReceived(projects, {})).toBe(150000);
+  });
+  it('receivables с ownerId считает только свои', () => {
+    const r = receivables([
+      { id: 'p1', name: 'A', stage: 'В работе', contractSum: 100000, paidAmount: 0, ownerId: 'me' },
+      { id: 'p2', name: 'B', stage: 'В работе', contractSum: 50000, paidAmount: 0, ownerId: 'other' },
+    ], {}, 'me');
+    expect(r.total).toBe(100000);
+    expect(r.items.length).toBe(1);
+  });
+});
