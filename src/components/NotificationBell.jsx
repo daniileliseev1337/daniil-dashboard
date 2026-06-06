@@ -18,6 +18,7 @@ export default function NotificationBell({ client, userId, onNavigate, showToast
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unread, setUnread] = useState(0);
+  const [panelTop, setPanelTop] = useState(0);
   const wrapRef = useRef(null);
 
   const refreshCount = useCallback(async () => {
@@ -47,7 +48,12 @@ export default function NotificationBell({ client, userId, onNavigate, showToast
   }, [client, userId, refreshCount]);
 
   // открытие панели → подгрузить ленту (refetch также чинит пропуски после reconnect)
-  useEffect(() => { if (open) loadList(); }, [open, loadList]);
+  // + замерить низ колокольчика для fixed-панели на мобильном (чтобы не вылезала за край)
+  useEffect(() => {
+    if (!open) return;
+    loadList();
+    if (wrapRef.current) setPanelTop(wrapRef.current.getBoundingClientRect().bottom + 8);
+  }, [open, loadList]);
 
   // клик вне → закрыть
   useEffect(() => {
@@ -80,16 +86,22 @@ export default function NotificationBell({ client, userId, onNavigate, showToast
     color: "#9b9ca4", display: "flex", alignItems: "center", gap: 6, transition: "all 0.18s", fontFamily: "inherit",
   };
 
-  // на мобильном колокольчик у левого края — открываем панель вправо (left:0),
-  // на десктопе кнопки справа — открываем влево (right:0); ширину клампим по вьюпорту
-  const panelStyle = {
-    position: "absolute", top: "calc(100% + 8px)",
-    ...(isMobile ? { left: 0 } : { right: 0 }),
-    width: isMobile ? "min(360px, calc(100vw - 24px))" : 360,
-    maxHeight: 460, overflowY: "auto", zIndex: 80, background: "#101012",
-    border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12,
-    boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
-  };
+  // мобильный: панель привязана к вьюпорту (fixed, left:8/right:8) — не вылезет ни
+  // влево, ни вправо независимо от позиции колокольчика; опускается под его низ.
+  // десктоп: обычный absolute-dropdown справа от колокольчика.
+  const panelStyle = isMobile
+    ? {
+        position: "fixed", top: panelTop, left: 8, right: 8, width: "auto",
+        maxHeight: "70vh", overflowY: "auto", zIndex: 80, background: "#101012",
+        border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
+      }
+    : {
+        position: "absolute", right: 0, top: "calc(100% + 8px)", width: 360,
+        maxHeight: 460, overflowY: "auto", zIndex: 80, background: "#101012",
+        border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12,
+        boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
+      };
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
