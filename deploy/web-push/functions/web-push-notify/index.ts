@@ -42,13 +42,6 @@ async function recipients(ids: (string | null | undefined)[], initiator: string 
   return Array.isArray(rows) ? rows.map((p) => p.id) : [];
 }
 
-// все одобренные минус владелец (broadcast)
-async function broadcastApproved(ownerId: string | undefined, flag: string): Promise<string[]> {
-  const r = await rest(`profiles?approved=eq.true&${flag}=eq.true&select=id`);
-  const rows = await r.json();
-  return Array.isArray(rows) ? rows.map((p) => p.id).filter((id) => id !== ownerId) : [];
-}
-
 // участники проекта (project_members) — может быть пуст в текущей модели
 async function projectMembers(projectId: string | null): Promise<string[]> {
   if (!projectId) return [];
