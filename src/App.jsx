@@ -2042,6 +2042,96 @@ function TxForm({ initial, onSave, onClose, saving }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// ПОД-ВИДЖЕТЫ DASHBOARD (Task 9 — определения; в DOM подключаются в Task 10)
+// ════════════════════════════════════════════════════════════════════════════
+
+function ReceivablesCard({ data }) {
+  const top = data.items.slice(0, 5);
+  const rest = data.items.length - top.length;
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <SectionTitle icon={<Wallet size={13} />}>Дебиторка · жду оплат</SectionTitle>
+        <span style={{ color: "#e8c860", fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmt(data.total)}</span>
+      </div>
+      {top.length === 0
+        ? <p style={{ color: "#62646b", fontSize: 13, margin: 0 }}>Все оплаты получены</p>
+        : top.map(it => (
+          <div key={it.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <span style={{ color: "#cdced4", fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
+            <span style={{ color: "#e8c860", fontSize: 12, flexShrink: 0, marginLeft: 8, fontVariantNumeric: "tabular-nums" }}>{fmt(it.remaining)}</span>
+          </div>
+        ))}
+      {rest > 0 && <p style={{ color: "#62646b", fontSize: 11, margin: "8px 0 0" }}>и ещё {rest}</p>}
+    </Card>
+  );
+}
+
+const EXP_COLORS = ["#d4af37", "#93c5fd", "#f8a3a3", "#6ee7a8", "#b794f6", "#6b6b67"];
+
+function ExpenseByCategoryCard({ data, tt }) {
+  return (
+    <Card>
+      <SectionTitle icon={<BarChart3 size={13} />}>Расходы по категориям</SectionTitle>
+      {data.length > 0
+        ? <ResponsiveContainer width="100%" height={210}>
+            <PieChart>
+              <Pie data={data} cx="50%" cy="50%" innerRadius={56} outerRadius={84} dataKey="value" nameKey="name" paddingAngle={3}>
+                {data.map((e, i) => <Cell key={i} fill={EXP_COLORS[i % EXP_COLORS.length]} stroke="transparent" />)}
+              </Pie>
+              <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v, n) => [fmt(v), n]} />
+              <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ fontSize: 10, color: "#9b9ca4" }}>{v}</span>} />
+            </PieChart>
+          </ResponsiveContainer>
+        : <Empty text="Нет расходов за период" />}
+    </Card>
+  );
+}
+
+function CashflowCard({ series, tt }) {
+  const has = series.length > 0;
+  return (
+    <Card>
+      <SectionTitle icon={<TrendingUp size={13} />}>Накопительный баланс</SectionTitle>
+      {has
+        ? <ResponsiveContainer width="100%" height={210}>
+            <LineChart data={series}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+              <XAxis dataKey="label" tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false}
+                tickFormatter={v => Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}к` : v} />
+              <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={v => [fmt(v), "Баланс"]} />
+              <Line type="monotone" dataKey="cumBalance" stroke="#6ee7a8" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        : <Empty text="Нет данных за период" />}
+    </Card>
+  );
+}
+
+function MyTasksCard({ data }) {
+  const rows = [...data.overdue, ...data.today];
+  return (
+    <Card>
+      <SectionTitle icon={<AlertTriangle size={13} />}>
+        Мои задачи · просрочено {data.counts.overdue} · сегодня {data.counts.today}
+      </SectionTitle>
+      {rows.length === 0
+        ? <p style={{ color: "#62646b", fontSize: 13, margin: 0 }}>Нет горящих задач</p>
+        : rows.map(t => {
+          const od = t.dueDate < todayStr();
+          return (
+            <div key={t.id} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+              <span style={{ color: od ? "#f8a3a3" : "#f7f8f8", fontSize: 13, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.title}</span>
+              <span style={{ color: "#62646b", fontSize: 11, flexShrink: 0, marginLeft: 8 }}>{fmtD(t.dueDate)}</span>
+            </div>
+          );
+        })}
+    </Card>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
 function Dashboard({ projects, txs }) {
