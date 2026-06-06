@@ -90,8 +90,6 @@ const PALETTE = ["#d4af37","#d4af37","#f59e0b","#6ee7a8","#f8a3a3","#8b5cf6","#e
 
 // Старые ключи window.storage — для попытки автоматического переноса данных
 // из предыдущей версии артефакта на этапе миграции
-const LEGACY_KEY_PROJECTS = "dash2_projects";
-const LEGACY_KEY_TXS      = "dash2_txs";
 
 // ════════════════════════════════════════════════════════════════════════════
 // UTILS — мелкие хелперы
@@ -6129,36 +6127,13 @@ function AdminPage({ profile, client, showToast }) {
 // ════════════════════════════════════════════════════════════════════════════
 // BACKUP / MIGRATION PANEL
 // ════════════════════════════════════════════════════════════════════════════
-// Модальное окно с тремя инструментами:
+// Модальное окно с двумя инструментами:
 //   1. Экспорт текущих данных в JSON (надёжный — через textarea, не window.open)
 //   2. Импорт из JSON-бэкапа (вставка в textarea)
-//   3. Автоматический импорт из window.storage предыдущей версии артефакта
 function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, showToast }) {
-  const [tab, setTab] = useState("export");        // export | import | legacy
+  const [tab, setTab] = useState("export");        // export | import
   const [importJson, setImportJson] = useState("");
   const [busy, setBusy] = useState(false);
-  const [legacyData, setLegacyData] = useState(null);
-  const [legacyChecked, setLegacyChecked] = useState(false);
-
-  // При открытии вкладки legacy — сразу пробуем прочитать window.storage
-  useEffect(() => {
-    if (tab === "legacy" && !legacyChecked) {
-      (async () => {
-        try {
-          const [pRes, tRes] = await Promise.all([
-            window.storage?.get?.(LEGACY_KEY_PROJECTS),
-            window.storage?.get?.(LEGACY_KEY_TXS),
-          ]);
-          const p = pRes ? JSON.parse(pRes.value) : [];
-          const t = tRes ? JSON.parse(tRes.value) : [];
-          setLegacyData({ projects: p || [], txs: t || [] });
-        } catch (e) {
-          setLegacyData({ projects: [], txs: [] });
-        }
-        setLegacyChecked(true);
-      })();
-    }
-  }, [tab, legacyChecked]);
 
   const exportJson = JSON.stringify({
     version: 2,
@@ -6206,7 +6181,6 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
         {[
           {id:"export", label:"Экспорт"},
           {id:"import", label:"Импорт из JSON"},
-          {id:"legacy", label:"Перенос из v1"},
         ].map(t => (
           <Chip key={t.id} label={t.label} active={tab===t.id} onClick={()=>setTab(t.id)}/>
         ))}
@@ -6269,50 +6243,6 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
         </div>
       )}
 
-      {tab === "legacy" && (
-        <div>
-          <p style={{fontSize:13,color:"#a8a8a3",marginBottom:12,lineHeight:1.5}}>
-            Попытка прочитать данные из локального хранилища предыдущей версии
-            (window.storage). Сработает только если этот артефакт открыт в той же
-            среде Claude, что и старый. Если нет — используй вкладку «Импорт из JSON».
-          </p>
-          {!legacyChecked ? (
-            <p style={{color:"#6b6b67",fontSize:13}}>Проверяю...</p>
-          ) : !legacyData || (legacyData.projects.length === 0 && legacyData.txs.length === 0) ? (
-            <div style={{
-              background:"#141414",border:"1px solid #1c1c1a",borderRadius:12,
-              padding:16,textAlign:"center",color:"#a8a8a3",fontSize:13,
-            }}>
-              В локальном хранилище нет данных предыдущей версии.
-              Воспользуйся вкладкой «Импорт из JSON».
-            </div>
-          ) : (
-            <>
-              <div style={{
-                background:"#141414",borderRadius:12,padding:14,marginBottom:12,
-                display:"flex",justifyContent:"space-around",
-              }}>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:10,color:"#6b6b67",fontWeight:700,textTransform:"uppercase"}}>Проектов</div>
-                  <div style={{fontSize:22,fontWeight:900,color:"#e8c860",marginTop:2}}>{legacyData.projects.length}</div>
-                </div>
-                <div style={{textAlign:"center"}}>
-                  <div style={{fontSize:10,color:"#6b6b67",fontWeight:700,textTransform:"uppercase"}}>Транзакций</div>
-                  <div style={{fontSize:22,fontWeight:900,color:"#d4af37",marginTop:2}}>{legacyData.txs.length}</div>
-                </div>
-              </div>
-              <button
-                onClick={()=>doImport(legacyData)}
-                disabled={busy}
-                className={BTN.primary}
-                style={{width:"100%",opacity:busy?0.5:1}}
-              >
-                {busy ? "Импортируем..." : "📥 Перенести в Supabase"}
-              </button>
-            </>
-          )}
-        </div>
-      )}
     </Modal>
   );
 }
