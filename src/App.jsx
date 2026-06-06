@@ -2046,6 +2046,12 @@ function TxForm({ initial, onSave, onClose, saving }) {
 // ПОД-ВИДЖЕТЫ DASHBOARD (Task 9 — определения; в DOM подключаются в Task 10)
 // ════════════════════════════════════════════════════════════════════════════
 
+// Заголовок зоны дашборда
+const ZONE_TITLE = (color) => ({
+  fontSize: 11, fontWeight: 600, color, letterSpacing: "0.08em",
+  margin: "0 0 10px", textTransform: "uppercase",
+});
+
 function ReceivablesCard({ data }) {
   const top = data.items.slice(0, 5);
   const rest = data.items.length - top.length;
@@ -2136,7 +2142,7 @@ function MyTasksCard({ data }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ projects, txs, tasks, profile, onDrillStage }) {
+function Dashboard({ projects, txs, tasks, onDrillStage }) {
   const [period, setPeriod] = useState("month");
   const range = periodRange(period);
   const prevRange = prevPeriodRange(period);
@@ -2154,15 +2160,15 @@ function Dashboard({ projects, txs, tasks, profile, onDrillStage }) {
   const series = financeSeries(txs, range, gran);
   const expCats = expenseByCategory(txs, range);
   const debt = receivables(projects);
-  const myT = myTasks(tasks || [], todayStr());
+  const today = todayStr();
+  const myT = myTasks(tasks || [], today);
 
   const stageData = PROJECT_STAGES.slice(0, -1)
     .map(s => ({ name: s, value: projects.filter(p => p.stage === s).length, fill: STAGE_META[s].color }))
     .filter(d => d.value > 0);
 
-  const todayS = todayStr();
-  const overdue = active.filter(p => p.deadline && p.deadline < todayS && p.stage !== "Сдан заказчику");
-  const upcoming = active.filter(p => p.deadline && p.deadline >= todayS)
+  const overdue = active.filter(p => p.deadline && p.deadline < today && p.stage !== "Сдан заказчику");
+  const upcoming = active.filter(p => p.deadline && p.deadline >= today)
     .sort((a, b) => a.deadline.localeCompare(b.deadline)).slice(0, 4);
 
   const tt = {
@@ -2282,12 +2288,6 @@ function Dashboard({ projects, txs, tasks, profile, onDrillStage }) {
     </motion.div>
   );
 }
-
-// Заголовок зоны дашборда
-const ZONE_TITLE = (color) => ({
-  fontSize: 11, fontWeight: 600, color, letterSpacing: "0.08em",
-  margin: "0 0 10px", textTransform: "uppercase",
-});
 
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECTS — список + CRUD через Supabase
@@ -7199,7 +7199,7 @@ export default function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
-            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} profile={profile} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} />}
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} />}
             {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
