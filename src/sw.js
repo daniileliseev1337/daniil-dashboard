@@ -3,6 +3,11 @@ import { precacheAndRoute } from 'workbox-precaching'
 
 precacheAndRoute(self.__WB_MANIFEST || [])
 
+// Новая версия SW активируется сразу и берёт управление страницами —
+// иначе старый SW продолжает отдавать закэшированный бандл, пока открыты вкладки.
+self.skipWaiting()
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
+
 self.addEventListener('push', (event) => {
   if (!event.data) return
   let payload = {}
