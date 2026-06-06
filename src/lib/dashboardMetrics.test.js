@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory } from './dashboardMetrics.js';
+import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory, receivables } from './dashboardMetrics.js';
 
 const NOW = new Date('2026-06-06T12:00:00');
 
@@ -124,4 +124,22 @@ describe('expenseByCategory', () => {
   it('пустой результат при отсутствии расходов', () => {
     expect(expenseByCategory([], range)).toEqual([]);
   });
+});
+
+describe('receivables', () => {
+  const projects = [
+    { id: 1, name: 'A', stage: 'В работе',  contractSum: 1000, paidAmount: 400 }, // 600
+    { id: 2, name: 'B', stage: 'Архив',     contractSum: 500,  paidAmount: 0 },   // архив — исключить
+    { id: 3, name: 'C', stage: 'Оплачен',   contractSum: 200,  paidAmount: 200 }, // 0 — исключить
+    { id: 4, name: 'D', stage: 'Договор подписан', contractSum: 300, paidAmount: 50 }, // 250
+  ];
+  const r = receivables(projects);
+  it('итог = сумма остатков по не-архивным с остатком > 0', () => expect(r.total).toBe(850));
+  it('items отсортированы по убыванию остатка', () => {
+    expect(r.items).toEqual([
+      { id: 1, name: 'A', remaining: 600 },
+      { id: 4, name: 'D', remaining: 250 },
+    ]);
+  });
+  it('пустой портфель → нули', () => expect(receivables([])).toEqual({ total: 0, items: [] }));
 });
