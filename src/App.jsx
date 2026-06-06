@@ -639,15 +639,15 @@ async function updateNotificationSettings(client, settings) {
   if (error) throw error;
 }
 
-// Отправка Telegram-уведомления через Edge Function.
+// Отправка Web Push уведомления через Edge Function (заменяет Telegram-канал).
 // Ошибки подавляются — уведомления best-effort.
-async function sendTelegramNotify(client, type, recipientId, data = {}) {
+async function sendPush(client, type, recipientId, data = {}) {
   try {
-    await client.functions.invoke("telegram-notify", {
+    await client.functions.invoke("web-push-notify", {
       body: { type, recipientId, ...data },
     });
   } catch (e) {
-    console.warn("Telegram notify failed:", e);
+    console.warn("Push notify failed:", e);
   }
 }
 
@@ -675,7 +675,7 @@ async function deleteTask(client, id) {
 }
 async function notifyTask(client, type, taskId, initiatorId) {
   try {
-    await client.functions.invoke("telegram-notify", { body: { type, taskId, initiatorId } });
+    await client.functions.invoke("web-push-notify", { body: { type, taskId, initiatorId } });
   } catch (e) { console.warn("task notify failed:", e); }
 }
 
@@ -2306,7 +2306,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       if (form.executorUserId) {
         const prevExecutorId = modal !== "add" ? modal?.executorUserId : null;
         if (form.executorUserId !== prevExecutorId) {
-          sendTelegramNotify(client, "team_invite", form.executorUserId, {
+          sendPush(client, "team_invite", form.executorUserId, {
             projectName: saved?.name || form.name,
             actorName: profile?.name || profile?.email,
             customText: "Тебя назначили исполнителем проекта",
@@ -2626,7 +2626,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                             setProjects(prev=>prev.map(x=>x.id===p.id?{...x,takenBy:profile?.id,stage:"В работе",executor:executorName}:x));
                             showToast("✓ Проект взят в работу");
                             // Уведомление владельцу проекта
-                            sendTelegramNotify(client,"project_taken",p.ownerId,{
+                            sendPush(client,"project_taken",p.ownerId,{
                               projectName:p.name,
                               actorName:profile?.name||profile?.email,
                             });
@@ -4329,7 +4329,7 @@ function CommentsSection({ projectId, profile, client, showToast, isOwner }) {
       setText("");
       await reload();
       // Уведомление всем участникам проекта (best-effort, через Edge Function)
-      sendTelegramNotify(client, "comment", null, {
+      sendPush(client, "comment", null, {
         projectId,
         commentText: trimmed,
         actorName: profile?.name || profile?.email,
@@ -4914,7 +4914,7 @@ function MembersManager({ projectId, profile, client, showToast, canManage }) {
       await addProjectMember(client, projectId, selectedUser.id, selectedRole);
       showToast(`✓ ${selectedUser.name || selectedUser.email} приглашён(а)`);
       // Уведомление приглашённому пользователю
-      sendTelegramNotify(client, "team_invite", selectedUser.id, {
+      sendPush(client, "team_invite", selectedUser.id, {
         projectName: "(проект)",
         actorName: profile?.name || profile?.email,
       });
