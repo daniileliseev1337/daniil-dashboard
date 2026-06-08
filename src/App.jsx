@@ -1849,9 +1849,19 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
               Доли участников
             </div>
 
-            {/* Список добавленных долей */}
-            {(f.shares || []).length > 0 && (
+            {/* Список долей: первой строкой — моя доля (остаток), затем участники */}
+            {(contractNum > 0 || (f.shares || []).length > 0) && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {contractNum > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", paddingBottom: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ fontSize: 12, color: "#d4af37", fontWeight: 600, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <UserCheck size={12} strokeWidth={2.4} /> Я · остаток
+                    </span>
+                    <span style={{ fontSize: 12, color: othersSum > contractNum ? "#f8a3a3" : "#d4af37", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {fmt(myRemainder)} · {Math.round(myRemainder / contractNum * 100)}%
+                    </span>
+                  </div>
+                )}
                 {(f.shares || []).map((sh, i) => (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 28px", gap: 6, alignItems: "center" }}>
                     <span style={{ fontSize: 12, color: "#fafaf7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sh.label}</span>
@@ -1890,18 +1900,10 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
               </div>
             )}
 
-            {/* Индикатор остатка */}
-            {contractNum > 0 && (
-              <div style={{ marginBottom: 10 }}>
-                {othersSum > contractNum ? (
-                  <div style={{ fontSize: 11, color: "#f8a3a3", fontWeight: 500 }}>
-                    ⚠ Доли превышают сумму договора
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 11, color: "#a8a8a3" }}>
-                    Твоя доля (остаток): <span style={{ color: "#d4af37", fontWeight: 600 }}>{fmt(myRemainder)}</span>
-                  </div>
-                )}
+            {/* Предупреждение о превышении (моя доля показана строкой выше) */}
+            {othersSum > contractNum && (
+              <div style={{ fontSize: 11, color: "#f8a3a3", fontWeight: 500, marginBottom: 10 }}>
+                ⚠ Доли превышают сумму договора
               </div>
             )}
 
