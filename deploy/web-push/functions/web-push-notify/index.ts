@@ -57,6 +57,14 @@ async function projectOwner(projectId: string | null): Promise<string | null> {
   return Array.isArray(rows) && rows[0] ? rows[0].owner_id : null;
 }
 
+// имя проекта по id — для информативного body и ссылки в уведомлении
+async function projectName(projectId: string | null | undefined): Promise<string | null> {
+  if (!projectId) return null;
+  const r = await rest(`projects?id=eq.${projectId}&select=name`);
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0].name : null;
+}
+
 // отправка payload всем подпискам перечисленных пользователей; 404/410 → удалить
 async function sendToUsers(userIds: string[], payload: object): Promise<number> {
   if (!userIds.length) return 0;
@@ -146,9 +154,9 @@ Deno.serve(async (req: Request) => {
         base = baseIds([...members, owner].filter((x) => x !== task.assigned_to), initiator);
         body = `🆕 Новая задача в проекте: ${task.title}`;
       }
-      await insertInbox(base, { type, title: "КЛИМАТ-ПРО", body, url: "/" });
+      await insertInbox(base, { type, title: "КЛИМАТ-ПРО", body, url: "/tasks" });
       const ids = await recipients(base, undefined, "notif_task");
-      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/", tag: `task-${taskId}` });
+      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/tasks", tag: `task-${taskId}` });
       return j({ ok: true, sent, inbox: base.length });
     }
 
@@ -167,10 +175,10 @@ Deno.serve(async (req: Request) => {
       for (const t of tasks) {
         const base = baseIds([t.author_id, t.assigned_to], undefined);
         const body = `⏰ Срок задачи «${t.title}»: ${t.due_date}`;
-        await insertInbox(base, { type: "deadline", title: "КЛИМАТ-ПРО", body, url: "/" });
+        await insertInbox(base, { type: "deadline", title: "КЛИМАТ-ПРО", body, url: "/tasks" });
         inbox += base.length;
         const ids = await recipients(base, undefined, "notif_deadline");
-        total += await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/", tag: `task-${t.id}` });
+        total += await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/tasks", tag: `task-${t.id}` });
       }
       return j({ ok: true, sent: total, inbox });
     }
@@ -179,10 +187,16 @@ Deno.serve(async (req: Request) => {
     if (type === "project_taken" || type === "team_invite") {
       const flag = type === "project_taken" ? "notif_project_taken" : "notif_team_invite";
       const base = baseIds([b.recipientId as string], initiator);
-      const body = type === "project_taken" ? "✅ Ваш проект взят в работу" : "👥 Вас пригласили в команду проекта";
-      await insertInbox(base, { type, title: "КЛИМАТ-ПРО", body, url: "/" });
+      const pid = b.projectId as string | undefined;
+      const name = (await projectName(pid)) || (b.projectName as string) || "проект";
+      const actor = b.actorName as string | undefined;
+      const body = type === "project_taken"
+        ? `✅ Проект «${name}» взят в работу${actor ? ` — ${actor}` : ""}`
+        : `👥 ${(b.customText as string) || "Вас добавили в команду проекта"}: «${name}»`;
+      const url = pid ? `/projects/${pid}` : "/";
+      await insertInbox(base, { type, title: "КЛИМАТ-ПРО", body, url });
       const ids = await recipients(base, undefined, flag);
-      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/" });
+      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url });
       return j({ ok: true, sent, inbox: base.length });
     }
 
@@ -195,19 +209,22 @@ Deno.serve(async (req: Request) => {
       const members = await projectMembers(task.project_id);
       const base = baseIds([task.author_id, task.assigned_to, ...members], initiator);
       const body = `💬 Новый комментарий: ${task.title}`;
-      await insertInbox(base, { type: "comment", title: "КЛИМАТ-ПРО", body, url: "/" });
+      await insertInbox(base, { type: "comment", title: "КЛИМАТ-ПРО", body, url: "/tasks" });
       const ids = await recipients(base, undefined, "notif_comment");
-      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/", tag: `task-${taskId}` });
+      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/tasks", tag: `task-${taskId}` });
       return j({ ok: true, sent, inbox: base.length });
     }
 
     // --- broadcast: новый проект в поиске исполнителя ---
     if (type === "project_published") {
       const base = await baseApproved(b.ownerId as string);
-      const body = "🆕 Новый проект в поиске исполнителя";
-      await insertInbox(base, { type: "project_published", title: "КЛИМАТ-ПРО", body, url: "/" });
+      const pid = b.projectId as string | undefined;
+      const name = (await projectName(pid)) || "проект";
+      const body = `🆕 Новый проект в поиске исполнителя: «${name}»`;
+      const url = pid ? `/projects/${pid}` : "/";
+      await insertInbox(base, { type: "project_published", title: "КЛИМАТ-ПРО", body, url });
       const ids = await recipients(base, undefined, "notif_new_project");
-      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url: "/" });
+      const sent = await sendToUsers(ids, { title: "КЛИМАТ-ПРО", body, url });
       return j({ ok: true, sent, inbox: base.length });
     }
 

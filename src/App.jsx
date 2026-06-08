@@ -2517,11 +2517,18 @@ function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, m
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECTS — список + CRUD через Supabase
 // ════════════════════════════════════════════════════════════════════════════
-function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные", sharesByProject, setSharesByProject }) {
+function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные", sharesByProject, setSharesByProject, pendingProjectId, onProjectOpened }) {
   const [modal, setModal]             = useState(null);
   const [stageFilter, setStageFilter] = useState(initialStageFilter);
   const [confirmDel, setConfirmDel]   = useState(null);
   const [saving, setSaving]           = useState(false);
+
+  // Открыть карточку проекта по клику из уведомления (Центр уведомлений → onNavigate /projects/<id>).
+  useEffect(() => {
+    if (!pendingProjectId) return;
+    const p = projects.find(x => x.id === pendingProjectId);
+    if (p) { setModal(p); onProjectOpened?.(); }
+  }, [pendingProjectId, projects]);
 
   const saveProject = async (form) => {
     setSaving(true);
@@ -2542,9 +2549,11 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
         for (const ex of (form.executors || [])) {
           if (ex.userId && !prevExecIds.has(ex.userId)) {
             sendPush(client, "team_invite", ex.userId, {
+              projectId: saved?.id,
               projectName: saved?.name || form.name,
               actorName: profile?.name || profile?.email,
               customText: "Тебя назначили исполнителем проекта",
+              initiatorId: profile?.id, // не уведомлять самого себя при self-assign
             });
           }
         }
@@ -2901,8 +2910,10 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                             showToast("✓ Проект взят в работу");
                             // Уведомление владельцу проекта
                             sendPush(client,"project_taken",p.ownerId,{
+                              projectId:p.id,
                               projectName:p.name,
                               actorName:profile?.name||profile?.email,
+                              initiatorId:profile?.id,
                             });
                           }catch(e){showToast("Ошибка: "+(e.message||""),"error");}
                         }}
@@ -4186,7 +4197,7 @@ function CsvImportModal({ onClose, onImport }) {
 // ════════════════════════════════════════════════════════════════════════════
 // FINANCE
 // ════════════════════════════════════════════════════════════════════════════
-function Finance({ txs, setTxs, client, ownerId, showToast }) {
+function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], sharesByProject = {}, myShares = [] }) {
   const [modal, setModal]           = useState(null);
   const [typeFilter, setTypeFilter] = useState("all");
   const [monthF, setMonthF]         = useState(todayStr().slice(0,7));
@@ -4242,6 +4253,12 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
   const inc = filtered.filter(t=>t.type==="income").reduce((s,t)=>s+(+t.amount||0),0);
   const exp = filtered.filter(t=>t.type==="expense").reduce((s,t)=>s+(+t.amount||0),0);
 
+  // Сводка «по проектам» (read-only): получено и к получению по МОЕЙ доле — теми же
+  // расчётами, что и дашборд. У paidAmount нет даты платежа → показываем «всего»,
+  // вне помесячного фильтра ручного кошелька (отдельный блок, не смешиваем с txs).
+  const projReceived   = ownerReceived(projects, sharesByProject, ownerId) + mySharesTotals(myShares).received;
+  const projReceivable = receivables(projects, sharesByProject, ownerId).total + mySharesTotals(myShares).receivable;
+
   const expByCat = EXPENSE_CATS
     .map(c=>({name:c,value:filtered.filter(t=>t.type==="expense"&&t.category===c).reduce((s,t)=>s+(+t.amount||0),0)}))
     .filter(d=>d.value>0);
@@ -4271,6 +4288,22 @@ function Finance({ txs, setTxs, client, ownerId, showToast }) {
           📂 Импорт CSV
         </button>
       </div>
+
+      {(projReceived > 0 || projReceivable > 0) && (
+        <Card style={{ marginBottom: 16 }}>
+          <SectionTitle>💼 По проектам · моя доля (всего)</SectionTitle>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ textAlign: "center" }}>
+              <Label>Получено по проектам</Label>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#6ee7a8", marginTop: 4 }}>{fmt(projReceived)}</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <Label>К получению</Label>
+              <div style={{ fontSize: 16, fontWeight: 900, color: projReceivable > 0 ? "#f8a3a3" : "#6b6b67", marginTop: 4 }}>{fmt(projReceivable)}</div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
         {[
@@ -4607,6 +4640,7 @@ function CommentsSection({ projectId, profile, client, showToast, isOwner }) {
         commentText: trimmed,
         actorName: profile?.name || profile?.email,
         actorId: profile?.id,
+        initiatorId: profile?.id, // не уведомлять автора о собственном комментарии
       });
     } catch (e) {
       showToast("Ошибка: " + (e.message || "не удалось отправить"), "error");
@@ -5188,8 +5222,9 @@ function MembersManager({ projectId, profile, client, showToast, canManage }) {
       showToast(`✓ ${selectedUser.name || selectedUser.email} приглашён(а)`);
       // Уведомление приглашённому пользователю
       sendPush(client, "team_invite", selectedUser.id, {
-        projectName: "(проект)",
+        projectId,
         actorName: profile?.name || profile?.email,
+        initiatorId: profile?.id,
       });
       setSelectedUser(null);
       setSearchQuery("");
@@ -6797,6 +6832,7 @@ export default function App() {
 
   const [tab, setTab]               = useState("dashboard");
   const [pendingStageFilter, setPendingStageFilter] = useState("Активные");
+  const [pendingProjectId, setPendingProjectId] = useState(null); // открыть проект по клику из уведомления
   const [projects, setProjects]     = useState([]);
   const [txs, setTxs]               = useState([]);
   const [tasks, setTasks]           = useState([]);
@@ -7037,6 +7073,10 @@ export default function App() {
       fontFamily: "'Geist Variable', system-ui, -apple-system, sans-serif",
     }}>
 
+      {/* Вся верхняя зона (шапка + вкладки) прилипает как единый блок — top вкладок
+          больше не зависит от переменной высоты шапки (фикс «вкладки уезжают под шапку»). */}
+      <div style={{ position: "sticky", top: 0, zIndex: 50 }}>
+
       {/* Шапка с логотипом, действиями и информацией о пользователе */}
       <div style={{
         borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -7048,9 +7088,6 @@ export default function App() {
         gap: 12,
         background: "rgba(8,9,15,0.85)",
         backdropFilter: "blur(8px)",
-        position: "sticky",
-        top: 0,
-        zIndex: 50,
       }}>
         {/* Логотип */}
         <div>
@@ -7093,7 +7130,11 @@ export default function App() {
               userId={profile?.id}
               showToast={showToast}
               isMobile={isMobile}
-              onNavigate={(url) => { if (url && url.startsWith("/tasks")) setTab("tasks"); }}
+              onNavigate={(url) => {
+                if (!url) return;
+                if (url.startsWith("/tasks")) setTab("tasks");
+                else if (url.startsWith("/projects/")) { setPendingProjectId(url.split("/")[2]); setTab("projects"); }
+              }}
             />
             {/* Кнопка отчёта — акцентная, в фирменном цвете */}
             <button
@@ -7224,9 +7265,6 @@ export default function App() {
         overflowX: "auto",
         background: "rgba(8,9,15,0.85)",
         backdropFilter: "blur(8px)",
-        position: "sticky",
-        top: 64,
-        zIndex: 40,
       }}>
         {TABS.map(t => {
           const isActive = tab === t.id;
@@ -7274,6 +7312,7 @@ export default function App() {
           );
         })}
       </div>
+      </div>
 
       {/* Содержимое страницы — обёрнуто в AnimatePresence для плавных переходов */}
       <div style={{ padding: 'clamp(12px, 4vw, 24px)', maxWidth: 1080, margin: "0 auto" }}>
@@ -7286,10 +7325,10 @@ export default function App() {
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
             {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} ownerId={profile.id} />}
-            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} />}
+            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} pendingProjectId={pendingProjectId} onProjectOpened={() => setPendingProjectId(null)} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
-            {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}
+            {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} projects={projects} sharesByProject={sharesByProject} myShares={myShares} />}
             {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
             {tab === "admin" && profile?.role === "admin" && <AdminPage profile={profile} client={supabase} showToast={showToast} />}
           </motion.div>
