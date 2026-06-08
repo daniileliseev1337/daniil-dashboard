@@ -148,7 +148,6 @@ function projectJsToDb(p, ownerId) {
     start_date:       p.startDate || null,
     deadline:         p.deadline || null,
     contract_sum:     parseFloat(p.contractSum) || 0,
-    paid_amount:      parseFloat(p.paidAmount)  || 0,
     notes:            p.notes || null,
     visibility:       p.visibility || "private",
     owner_id:         ownerId,
@@ -293,6 +292,10 @@ function shareDbToJs(row) {
   };
 }
 
+function paymentDbToJs(row) {
+  return { id: row.id, amount: Number(row.amount) || 0, paidOn: row.paid_on, note: row.note || "" };
+}
+
 // Доли всех проектов владельца (RLS вернёт только доступные). Группируем по projectId.
 async function fetchProjectShares(client) {
   const { data, error } = await client.from("project_shares").select("*");
@@ -303,6 +306,18 @@ async function fetchProjectShares(client) {
     (byProject[s.projectId] = byProject[s.projectId] || []).push(s);
   }
   return byProject; // { [projectId]: [share, ...] }
+}
+
+async function fetchProjectPayments(client, projectId) {
+  const { data, error } = await client.from("project_payments")
+    .select("id, amount, paid_on, note").eq("project_id", projectId).order("paid_on", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(paymentDbToJs);
+}
+async function setProjectPayments(client, projectId, rows) {
+  const payload = (rows || []).map(r => ({ amount: Number(r.amount) || 0, paid_on: r.paidOn, note: r.note || null }));
+  const { error } = await client.rpc("set_project_payments", { p_project_id: projectId, p_rows: payload });
+  if (error) throw error;
 }
 
 // Мои доли в чужих проектах (приватная проекция через RPC).
@@ -1521,6 +1536,8 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     })),
     // v2.2 исполнители
     executors: (initial.executors || []).map(e => ({ name: e.name || "", userId: e.userId || null })),
+    // v3.0 платежи (загружаются в useEffect ниже)
+    payments: [],
   } : {
     name: "", client: "", executor: "", type: "ОВиК", stage: "Переговоры",
     startDate: todayStr(), deadline: "", contractSum: "", paidAmount: "", notes: "",
@@ -1534,6 +1551,8 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     shares: [],
     // v2.2 поля
     executors: [],
+    // v3.0 платежи
+    payments: [],
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -1577,6 +1596,18 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     return () => clearTimeout(t);
   }, [shareUserQuery]); // eslint-disable-line
 
+  // v3.0: загрузка платежей при открытии существующего проекта.
+  // paymentsReady блокирует «Сохранить», пока платежи не загрузились — иначе replace-all
+  // пустым массивом сотрёт реальные платежи (race при быстром нажатии «Сохранить»).
+  const [paymentsReady, setPaymentsReady] = useState(!initial?.id);
+  useEffect(() => {
+    if (!client || !initial?.id) return;
+    fetchProjectPayments(client, initial.id)
+      .then(payments => setF(p => ({ ...p, payments })))
+      .catch(() => {}) // не критично — продолжим с пустым массивом
+      .finally(() => setPaymentsReady(true));
+  }, [initial?.id]); // eslint-disable-line
+
   const addShare = (part) => setF(p => ({ ...p, shares: [...(p.shares || []), {
     participantUserId: part.userId || null,
     participantClientId: part.clientId || null,
@@ -1586,6 +1617,11 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
   }] }));
   const updateShare = (i, patch) => setF(p => ({ ...p, shares: p.shares.map((s, j) => j === i ? { ...s, ...patch } : s) }));
   const removeShare = (i) => setF(p => ({ ...p, shares: p.shares.filter((_, j) => j !== i) }));
+
+  // v3.0: платежи
+  const addPayment = () => setF(p => ({ ...p, payments: [...(p.payments || []), { paidOn: todayStr(), amount: "", note: "" }] }));
+  const updatePayment = (i, key, val) => setF(p => ({ ...p, payments: (p.payments || []).map((r, j) => j === i ? { ...r, [key]: val } : r) }));
+  const removePayment = (i) => setF(p => ({ ...p, payments: (p.payments || []).filter((_, j) => j !== i) }));
 
   // редактирование отдельных полей конкретной записи
   const addLink = () => {
@@ -1745,17 +1781,7 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         </div>
         <div>
           <Label>Стадия</Label>
-          <StyledSelect value={f.stage} onChange={e => {
-            const v = e.target.value;
-            setF(p => {
-              const next = { ...p, stage: v };
-              if (v === "Оплачен") {
-                const c = Number(p.contractSum) || 0, paid = Number(p.paidAmount) || 0;
-                if (c > 0 && paid < c) next.paidAmount = c;
-              }
-              return next;
-            });
-          }}>
+          <StyledSelect value={f.stage} onChange={e => s("stage", e.target.value)}>
             {PROJECT_STAGES.map(t => <option key={t}>{t}</option>)}
           </StyledSelect>
         </div>
@@ -1769,8 +1795,21 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div><Label>Сумма договора (₽)</Label>
           <StyledInput type="number" value={f.contractSum} onChange={e => s("contractSum", e.target.value)} placeholder="0" /></div>
-        <div><Label>Оплачено факт (₽)</Label>
-          <StyledInput type="number" value={f.paidAmount} onChange={e => s("paidAmount", e.target.value)} placeholder="0" /></div>
+        <div>
+          <Label>Платежи</Label>
+          {(f.payments || []).map((pay, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+              <input type="date" value={pay.paidOn || ""} onChange={e => updatePayment(i, "paidOn", e.target.value)} style={{ ...BASE_INPUT, width: "auto" }} />
+              <StyledInput type="number" value={pay.amount} onChange={e => updatePayment(i, "amount", e.target.value)} placeholder="сумма" />
+              <StyledInput value={pay.note || ""} onChange={e => updatePayment(i, "note", e.target.value)} placeholder="заметка" />
+              <button type="button" onClick={() => removePayment(i)} className={BTN.edit}>🗑️</button>
+            </div>
+          ))}
+          <button type="button" onClick={addPayment} className={BTN.edit}>+ платёж</button>
+          <div style={{ fontSize: 12, color: "#a8a8a3", marginTop: 4 }}>
+            Оплачено всего: <span style={{ color: "#6ee7a8", fontWeight: 600 }}>{fmt((f.payments || []).reduce((s, p) => s + (+p.amount || 0), 0))}</span>
+          </div>
+        </div>
       </div>
 
       {/* ═══ НОВАЯ СЕКЦИЯ: Доли участников (v2.1) ═══ */}
@@ -2189,8 +2228,8 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
       </Field>
       <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
         <button onClick={onClose} className={BTN.ghost} style={{ flex: 1 }} disabled={saving}>Отмена</button>
-        <button onClick={() => onSave(f)} className={BTN.primary} style={{ flex: 2, opacity: saving ? 0.6 : 1 }} disabled={saving}>
-          {saving ? "Сохраняем..." : "Сохранить"}
+        <button onClick={() => onSave(f)} className={BTN.primary} style={{ flex: 2, opacity: (saving || !paymentsReady) ? 0.6 : 1 }} disabled={saving || !paymentsReady}>
+          {saving ? "Сохраняем..." : !paymentsReady ? "Загрузка платежей…" : "Сохранить"}
         </button>
       </div>
     </div>
@@ -2578,6 +2617,21 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
           const freshShares = await fetchProjectShares(client);
           setSharesByProject(freshShares);
         }
+
+        // v3.0: сохраняем платежи
+        // При стадии «Оплачен» — если сумма платежей < суммы договора, добавляем платёж на остаток
+        let paymentsToSave = [...(form.payments || [])];
+        if (form.stage === "Оплачен") {
+          const contractSum = Number(form.contractSum) || 0;
+          const paidSum = paymentsToSave.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+          if (contractSum > 0 && paidSum < contractSum) {
+            paymentsToSave = [...paymentsToSave, { paidOn: todayStr(), amount: contractSum - paidSum, note: "" }];
+          }
+        }
+        await setProjectPayments(client, projectId, paymentsToSave);
+        // Перезагружаем проекты, чтобы получить paid_amount пересчитанный триггером
+        const freshProjects = await fetchProjects(client);
+        setProjects(freshProjects);
       }
       setModal(null);
     } catch (e) {
