@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
 import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
-import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks } from "./lib/dashboardMetrics";
+import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals } from "./lib/dashboardMetrics";
 import NotificationBell from "./components/NotificationBell";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -132,6 +132,8 @@ function projectDbToJs(row) {
     clientId:       row.client_id || null,
     // Поля v2.0 — маркетплейс
     takenBy:        row.taken_by || null,
+    // Поля v2.2 — несколько исполнителей
+    executors:      Array.isArray(row.executors) ? row.executors.map(e => ({ name: e.name || "", userId: e.userId || null })) : [],
   };
 }
 
@@ -139,7 +141,8 @@ function projectJsToDb(p, ownerId) {
   return {
     name:             p.name || "Без названия",
     client:           p.client || null,
-    executor:         p.executor || null,
+    executor:         (p.executors || []).map(e => e.name).filter(Boolean).join(", ") || null,
+    executors:        (p.executors || []).filter(e => e && e.name).map(e => ({ name: e.name, userId: e.userId || null })),
     type:             p.type || null,
     stage:            p.stage || "Переговоры",
     start_date:       p.startDate || null,
@@ -274,6 +277,44 @@ function txJsToDb(t, ownerId) {
     description: t.description || null,
     owner_id:    ownerId,
   };
+}
+
+function shareDbToJs(row) {
+  return {
+    id:                row.id,
+    projectId:         row.project_id,
+    participantUserId: row.participant_user_id || null,
+    participantClientId: row.participant_client_id || null,
+    participantName:   row.participant_name || "",
+    participantLabel:  row.participant_label || "",
+    shareKind:         row.share_kind === "amount" ? "amount" : "percent",
+    shareValue:        row.share_value != null ? Number(row.share_value) : 0,
+    note:              row.note || "",
+  };
+}
+
+// Доли всех проектов владельца (RLS вернёт только доступные). Группируем по projectId.
+async function fetchProjectShares(client) {
+  const { data, error } = await client.from("project_shares").select("*");
+  if (error) throw error;
+  const byProject = {};
+  for (const row of data || []) {
+    const s = shareDbToJs(row);
+    (byProject[s.projectId] = byProject[s.projectId] || []).push(s);
+  }
+  return byProject; // { [projectId]: [share, ...] }
+}
+
+// Мои доли в чужих проектах (приватная проекция через RPC).
+async function getMyShares(client) {
+  const { data, error } = await client.rpc("get_my_shares");
+  if (error) throw error;
+  return (data || []).map(r => ({
+    projectName:  r.project_name,
+    myAmount:     Number(r.my_amount) || 0,
+    myReceived:   Number(r.my_received) || 0,
+    myReceivable: Number(r.my_receivable) || 0,
+  }));
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1484,7 +1525,19 @@ function AuthScreen({ onAuthenticated, onError }) {
 // PROJECT FORM
 // ════════════════════════════════════════════════════════════════════════════
 function ProjectForm({ initial, onSave, onClose, saving, client, profile, showToast, isOwner }) {
-  const [f, setF] = useState(initial || {
+  const [f, setF] = useState(initial ? {
+    ...initial,
+    shares: (initial.shares || []).map(s => ({
+      participantUserId: s.participantUserId || null,
+      participantClientId: s.participantClientId || null,
+      participantName: s.participantName || "",
+      label: s.participantName || s.participantLabel || "участник",
+      shareKind: s.shareKind || "percent",
+      shareValue: s.shareValue ?? "",
+    })),
+    // v2.2 исполнители
+    executors: (initial.executors || []).map(e => ({ name: e.name || "", userId: e.userId || null })),
+  } : {
     name: "", client: "", executor: "", type: "ОВиК", stage: "Переговоры",
     startDate: todayStr(), deadline: "", contractSum: "", paidAmount: "", notes: "",
     visibility: "private",
@@ -1495,7 +1548,10 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     clientId: null,
     // v2.0 поля
     visibilityUsers: [], // для режима selected: [{id, email, name}]
-    executorUserId: null, // UUID исполнителя для Telegram-уведомления
+    // v2.1 поля
+    shares: [],
+    // v2.2 поля
+    executors: [],
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
 
@@ -1533,24 +1589,56 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     setF(p => ({ ...p, visibilityUsers: (p.visibilityUsers || []).filter(u => u.id !== id) }));
   };
 
-  // v2.0: поиск исполнителя по пользователям системы
+  // v2.2: поиск исполнителей (несколько), паттерн как в TasksView
   const [execQuery, setExecQuery]     = useState("");
   const [execResults, setExecResults] = useState([]);
+  // Ввод внешнего исполнителя без аккаунта
+  const [execExtName, setExecExtName] = useState("");
 
   useEffect(() => {
     if (!client || !execQuery.trim()) { setExecResults([]); return; }
     const t = setTimeout(async () => {
-      const res = await searchApprovedUsers(client, execQuery);
-      setExecResults(res);
+      try {
+        const res = await searchApprovedUsers(client, execQuery);
+        const q = execQuery.trim().toLowerCase();
+        const selfMatches = profile?.id &&
+          ((profile.name || "").toLowerCase().includes(q) || (profile.email || "").toLowerCase().includes(q));
+        const out = (selfMatches && !res.some(u => u.id === profile.id))
+          ? [{ id: profile.id, name: profile.name, email: profile.email }, ...res]
+          : res;
+        setExecResults(out);
+      } catch { setExecResults([]); }
     }, 300);
     return () => clearTimeout(t);
   }, [execQuery]); // eslint-disable-line
 
-  const selectExecUser = (user) => {
-    setF(p => ({ ...p, executor: user.name || user.email, executorUserId: user.id }));
-    setExecQuery("");
-    setExecResults([]);
-  };
+  const addExecutor = (ex) => setF(p => ({ ...p, executors: [...(p.executors || []), { name: ex.name, userId: ex.userId || null }] }));
+  const removeExecutor = (i) => setF(p => ({ ...p, executors: (p.executors || []).filter((_, j) => j !== i) }));
+
+  // v2.1: автокомплит участника доли
+  const [shareUserQuery, setShareUserQuery] = useState("");
+  const [shareUserResults, setShareUserResults] = useState([]);
+  const [shareExtName, setShareExtName] = useState("");
+
+  useEffect(() => {
+    if (!client || !shareUserQuery.trim()) { setShareUserResults([]); return; }
+    const t = setTimeout(async () => {
+      const res = await searchApprovedUsers(client, shareUserQuery);
+      setShareUserResults(res);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [shareUserQuery]); // eslint-disable-line
+
+  const addShare = (part) => setF(p => ({ ...p, shares: [...(p.shares || []), {
+    participantUserId: part.userId || null,
+    participantClientId: part.clientId || null,
+    participantName: part.name && !part.userId && !part.clientId ? part.name : "",
+    label: part.name || "участник",
+    shareKind: "percent", shareValue: "",
+  }] }));
+  const updateShare = (i, patch) => setF(p => ({ ...p, shares: p.shares.map((s, j) => j === i ? { ...s, ...patch } : s) }));
+  const removeShare = (i) => setF(p => ({ ...p, shares: p.shares.filter((_, j) => j !== i) }));
+
   // редактирование отдельных полей конкретной записи
   const addLink = () => {
     setF(p => ({ ...p, links: [...(p.links || []), { title: "", url: "" }] }));
@@ -1597,35 +1685,107 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             <StyledInput value={f.client} onChange={e => s("client", e.target.value)} />
           )}
         </div>
-        <div style={{ position: "relative" }}><Label>Исполнитель</Label>
-          <StyledInput value={f.executor}
-            onChange={e => { s("executor", e.target.value); s("executorUserId", null); setExecQuery(e.target.value); }}
-            onBlur={() => setTimeout(() => setExecResults([]), 200)}
-            placeholder="Н-р: Субподряд" />
-          {execResults.length > 0 && (
-            <div style={{
-              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
-              background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: 8, overflow: "hidden", marginTop: 2,
-            }}>
-              {execResults.map(u => (
-                <div key={u.id}
-                  onMouseDown={() => selectExecUser(u)}
-                  style={{
-                    padding: "8px 12px", cursor: "pointer", fontSize: 12,
-                    borderBottom: "1px solid rgba(255,255,255,0.06)",
-                    display: "flex", alignItems: "center", gap: 8,
-                  }}
-                  onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.10)"}
-                  onMouseOut={e => e.currentTarget.style.background = "transparent"}
-                >
-                  <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
-                  {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
-                  <Send size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
+        <div>
+          <Label>Исполнители</Label>
+          {/* Список добавленных исполнителей */}
+          {(f.executors || []).length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 }}>
+              {(f.executors || []).map((ex, i) => (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "rgba(255,255,255,0.05)", borderRadius: 6,
+                  padding: "5px 8px", fontSize: 12,
+                }}>
+                  {ex.userId
+                    ? <UserCheck size={12} strokeWidth={2.2} style={{ color: "#d4af37", flexShrink: 0 }} />
+                    : <User size={12} strokeWidth={2.2} style={{ color: "#6b6b67", flexShrink: 0 }} />
+                  }
+                  <span style={{ color: "#fafaf7", flex: 1 }}>{ex.name}</span>
+                  <button type="button" onMouseDown={() => removeExecutor(i)} style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    color: "#6b6b67", padding: 2, display: "flex", alignItems: "center",
+                  }}>
+                    <X size={12} strokeWidth={2.4} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
+          {/* Autocomplete — выбор из системы */}
+          <div style={{ position: "relative", marginBottom: 6 }}>
+            <StyledInput
+              value={execQuery}
+              onChange={e => setExecQuery(e.target.value)}
+              onBlur={() => setTimeout(() => setExecResults([]), 200)}
+              placeholder="Найти в системе..." />
+            {execResults.length > 0 && (
+              <div style={{
+                position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 8, overflow: "hidden", marginTop: 2,
+              }}>
+                {execResults.map(u => {
+                  const alreadyAdded = (f.executors || []).some(e => e.userId === u.id);
+                  return (
+                    <div key={u.id}
+                      onMouseDown={() => {
+                        if (!alreadyAdded) {
+                          addExecutor({ name: u.name || u.email, userId: u.id });
+                          setExecQuery("");
+                          setExecResults([]);
+                        }
+                      }}
+                      style={{
+                        padding: "8px 12px", cursor: alreadyAdded ? "default" : "pointer", fontSize: 12,
+                        borderBottom: "1px solid rgba(255,255,255,0.06)",
+                        display: "flex", alignItems: "center", gap: 8,
+                        opacity: alreadyAdded ? 0.45 : 1,
+                      }}
+                      onMouseOver={e => { if (!alreadyAdded) e.currentTarget.style.background = "rgba(212,175,55,0.10)"; }}
+                      onMouseOut={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                      {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
+                      {u.id === profile?.id && <span style={{ color: "#d4af37", fontSize: 11 }}>(я)</span>}
+                      {alreadyAdded
+                        ? <Check size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#6b6b67", flexShrink: 0 }} />
+                        : <Plus size={10} strokeWidth={2.4} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
+                      }
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          {/* Добавить внешнего по имени (без аккаунта) */}
+          <div style={{ display: "flex", gap: 6 }}>
+            <StyledInput
+              value={execExtName}
+              onChange={e => setExecExtName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && execExtName.trim()) {
+                  e.preventDefault();
+                  addExecutor({ name: execExtName.trim(), userId: null });
+                  setExecExtName("");
+                }
+              }}
+              placeholder="Внешний (без аккаунта)" style={{ flex: 1 }} />
+            <button type="button"
+              onMouseDown={() => {
+                if (execExtName.trim()) {
+                  addExecutor({ name: execExtName.trim(), userId: null });
+                  setExecExtName("");
+                }
+              }}
+              style={{
+                background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.3)",
+                borderRadius: 7, cursor: "pointer", color: "#d4af37", padding: "0 10px",
+                fontSize: 11, display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+              }}
+            >
+              <Plus size={11} strokeWidth={2.4} /> добавить
+            </button>
+          </div>
         </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -1637,7 +1797,17 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         </div>
         <div>
           <Label>Стадия</Label>
-          <StyledSelect value={f.stage} onChange={e => s("stage", e.target.value)}>
+          <StyledSelect value={f.stage} onChange={e => {
+            const v = e.target.value;
+            setF(p => {
+              const next = { ...p, stage: v };
+              if (v === "Оплачен") {
+                const c = Number(p.contractSum) || 0, paid = Number(p.paidAmount) || 0;
+                if (c > 0 && paid < c) next.paidAmount = c;
+              }
+              return next;
+            });
+          }}>
             {PROJECT_STAGES.map(t => <option key={t}>{t}</option>)}
           </StyledSelect>
         </div>
@@ -1654,6 +1824,177 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         <div><Label>Оплачено факт (₽)</Label>
           <StyledInput type="number" value={f.paidAmount} onChange={e => s("paidAmount", e.target.value)} placeholder="0" /></div>
       </div>
+
+      {/* ═══ НОВАЯ СЕКЦИЯ: Доли участников (v2.1) ═══ */}
+      {(() => {
+        const contractNum = Number(f.contractSum) || 0;
+        const othersSum = (f.shares || []).reduce((acc, sh) => acc + (sh.shareKind === "amount"
+          ? Number(sh.shareValue) || 0
+          : contractNum * (Number(sh.shareValue) || 0) / 100), 0);
+        const myRemainder = Math.max(0, contractNum - othersSum);
+        return (
+          <div style={{
+            marginBottom: 14, padding: "12px 14px",
+            background: "rgba(212,175,55,0.04)",
+            border: "1px solid rgba(212,175,55,0.12)",
+            borderRadius: 10,
+          }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6,
+              fontSize: 11, fontWeight: 600, color: "#d4af37",
+              textTransform: "uppercase", letterSpacing: "0.10em",
+              marginBottom: 12,
+            }}>
+              <Users size={12} strokeWidth={2.4} />
+              Доли участников
+            </div>
+
+            {/* Список долей: первой строкой — моя доля (остаток), затем участники */}
+            {(contractNum > 0 || (f.shares || []).length > 0) && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                {contractNum > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", paddingBottom: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ fontSize: 12, color: "#d4af37", fontWeight: 600, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <UserCheck size={12} strokeWidth={2.4} /> Я · остаток
+                    </span>
+                    <span style={{ fontSize: 12, color: othersSum > contractNum ? "#f8a3a3" : "#d4af37", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      {fmt(myRemainder)} · {Math.round(myRemainder / contractNum * 100)}%
+                    </span>
+                  </div>
+                )}
+                {(f.shares || []).map((sh, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 90px 70px 28px", gap: 6, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, color: "#fafaf7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sh.label}</span>
+                    <StyledInput
+                      type="number"
+                      value={sh.shareValue}
+                      onChange={e => updateShare(i, { shareValue: e.target.value })}
+                      placeholder="0"
+                      style={{ fontSize: 12, padding: "6px 10px" }}
+                    />
+                    <StyledSelect
+                      value={sh.shareKind}
+                      onChange={e => updateShare(i, { shareKind: e.target.value })}
+                      style={{ fontSize: 12, padding: "6px 8px" }}
+                    >
+                      <option value="percent">%</option>
+                      <option value="amount">₽</option>
+                    </StyledSelect>
+                    <button
+                      type="button"
+                      onClick={() => removeShare(i)}
+                      style={{
+                        background: "transparent", border: "none", color: "#6b6b67",
+                        cursor: "pointer", padding: 4,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        transition: "color 0.18s",
+                      }}
+                      onMouseOver={e => e.currentTarget.style.color = "#f8a3a3"}
+                      onMouseOut={e => e.currentTarget.style.color = "#6b6b67"}
+                      title="Удалить долю"
+                    >
+                      <Trash2 size={14} strokeWidth={2} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Предупреждение о превышении (моя доля показана строкой выше) */}
+            {othersSum > contractNum && (
+              <div style={{ fontSize: 11, color: "#f8a3a3", fontWeight: 500, marginBottom: 10 }}>
+                ⚠ Доли превышают сумму договора
+              </div>
+            )}
+
+            {/* Добавить: юзер-автокомплит */}
+            <div style={{ marginBottom: 8 }}>
+              <Label>Добавить пользователя системы</Label>
+              <div style={{ position: "relative" }}>
+                <StyledInput
+                  value={shareUserQuery}
+                  onChange={e => setShareUserQuery(e.target.value)}
+                  onBlur={() => setTimeout(() => setShareUserResults([]), 200)}
+                  placeholder="Поиск по имени или email…"
+                  style={{ fontSize: 12 }}
+                />
+                {shareUserResults.length > 0 && (
+                  <div style={{
+                    position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50,
+                    background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)",
+                    borderRadius: 8, overflow: "hidden", marginTop: 2,
+                  }}>
+                    {shareUserResults.map(u => (
+                      <div key={u.id}
+                        onMouseDown={() => {
+                          addShare({ userId: u.id, name: u.name || u.email });
+                          setShareUserQuery("");
+                          setShareUserResults([]);
+                        }}
+                        style={{
+                          padding: "8px 12px", cursor: "pointer", fontSize: 12,
+                          borderBottom: "1px solid rgba(255,255,255,0.06)",
+                          display: "flex", alignItems: "center", gap: 8,
+                        }}
+                        onMouseOver={e => e.currentTarget.style.background = "rgba(212,175,55,0.10)"}
+                        onMouseOut={e => e.currentTarget.style.background = "transparent"}
+                      >
+                        <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                        {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
+                        <Send size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#d4af37", flexShrink: 0 }} />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Добавить: текущий заказчик */}
+            {f.clientId && f.client && (
+              <div style={{ marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => addShare({ clientId: f.clientId, name: f.client })}
+                  style={{
+                    fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer", fontWeight: 500,
+                    background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.30)",
+                    color: "#d4af37", display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit",
+                  }}
+                >
+                  <Plus size={11} strokeWidth={2.4} /> + заказчик ({f.client})
+                </button>
+              </div>
+            )}
+
+            {/* Добавить: внешний участник */}
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <StyledInput
+                value={shareExtName}
+                onChange={e => setShareExtName(e.target.value)}
+                placeholder="Внешний участник (имя)"
+                style={{ fontSize: 12, flex: 1 }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (shareExtName.trim()) {
+                    addShare({ name: shareExtName.trim() });
+                    setShareExtName("");
+                  }
+                }}
+                style={{
+                  fontSize: 11, padding: "4px 10px", borderRadius: 7, cursor: "pointer", fontWeight: 500,
+                  background: "rgba(212,175,55,0.12)", border: "1px solid rgba(212,175,55,0.30)",
+                  color: "#d4af37", display: "flex", alignItems: "center", gap: 4, fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Plus size={11} strokeWidth={2.4} /> добавить
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ НОВАЯ СЕКЦИЯ: Контакты заказчика ═══ */}
       <div style={{
@@ -2059,6 +2400,26 @@ function ReceivablesCard({ data }) {
   );
 }
 
+function MySharesCard({ shares }) {
+  if (!shares || !shares.length) return null;
+  const totalReceived = shares.reduce((s, x) => s + (x.myReceived || 0), 0);
+  const top = [...shares].sort((a, b) => b.myReceivable - a.myReceivable).slice(0, 5);
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <SectionTitle icon={<Wallet size={13} />}>Мои доли в проектах</SectionTitle>
+        <span style={{ color: "#6ee7a8", fontSize: 14, fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmt(totalReceived)}</span>
+      </div>
+      {top.map((it, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+          <span style={{ color: "#cdced4", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.projectName}</span>
+          <span style={{ color: "#e8c860", flexShrink: 0, marginLeft: 8, fontVariantNumeric: "tabular-nums" }}>{fmt(it.myReceived)} / {fmt(it.myAmount)}</span>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
 const EXP_COLORS = ["#d4af37", "#93c5fd", "#f8a3a3", "#6ee7a8", "#b794f6", "#6b6b67"];
 
 function ExpenseByCategoryCard({ data, tt }) {
@@ -2127,7 +2488,7 @@ function MyTasksCard({ data }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ projects, txs, tasks, onDrillStage }) {
+function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [], ownerId = null }) {
   const [period, setPeriod] = useState("month");
   const range = periodRange(period);
   const prevRange = prevPeriodRange(period);
@@ -2144,7 +2505,10 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
 
   const series = financeSeries(txs, range, gran);
   const expCats = expenseByCategory(txs, range);
-  const debt = receivables(projects);
+  const debt = receivables(projects, sharesByProject, ownerId);
+  const sharesTot = mySharesTotals(myShares);
+  const myReceived = ownerReceived(projects, sharesByProject, ownerId) + sharesTot.received;
+  const debtTotal = debt.total + sharesTot.receivable;
   const today = todayStr();
   const myT = myTasks(tasks || [], today);
 
@@ -2189,7 +2553,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
           <KpiCard label="Активных проектов" value={active.length} Icon={FolderKanban} color="#d4af37" sub={`всего: ${projects.length}`} />
         </div>
         <KpiCard label="Портфель" value={totalContract} Icon={Briefcase} color="#d4af37" format={fmt} />
-        <KpiCard label="Получено" value={totalPaid} Icon={BadgeCheck} color="#6ee7a8" format={fmt} sub={`осталось: ${fmt(totalContract - totalPaid)}`} />
+        <KpiCard label="Получено" value={myReceived} Icon={BadgeCheck} color="#6ee7a8" format={fmt} sub={`жду: ${fmt(debtTotal)}`} />
         <KpiCard label="Баланс за период" value={bal.balance} Icon={Wallet} color={bal.balance >= 0 ? "#6ee7a8" : "#f8a3a3"} format={fmt} sub={`доходы ${fmt(bal.income)}`} trend={balanceTrend} />
       </motion.div>
 
@@ -2235,6 +2599,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
           <ExpenseByCategoryCard data={expCats} tt={tt} />
         </div>
         <ReceivablesCard data={debt} />
+        <MySharesCard shares={myShares} />
       </motion.div>
 
       {/* ЗОНА: Проекты */}
@@ -2277,7 +2642,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage }) {
 // ════════════════════════════════════════════════════════════════════════════
 // PROJECTS — список + CRUD через Supabase
 // ════════════════════════════════════════════════════════════════════════════
-function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные" }) {
+function Projects({ projects, setProjects, clients, client, profile, ownerId, showToast, initialStageFilter = "Активные", sharesByProject, setSharesByProject }) {
   const [modal, setModal]             = useState(null);
   const [stageFilter, setStageFilter] = useState(initialStageFilter);
   const [confirmDel, setConfirmDel]   = useState(null);
@@ -2301,15 +2666,38 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
         const userIds = (form.visibilityUsers || []).map(u => u.id).filter(Boolean);
         await setProjectVisibilityUsers(client, saved.id, userIds);
       }
-      // v2.0: уведомление исполнителю если он выбран из системы
-      if (form.executorUserId) {
-        const prevExecutorId = modal !== "add" ? modal?.executorUserId : null;
-        if (form.executorUserId !== prevExecutorId) {
-          sendPush(client, "team_invite", form.executorUserId, {
-            projectName: saved?.name || form.name,
-            actorName: profile?.name || profile?.email,
-            customText: "Тебя назначили исполнителем проекта",
-          });
+      // v2.2: уведомление новым исполнителям-пользователям системы
+      {
+        const prevExecIds = new Set(((modal !== "add" ? modal?.executors : null) || []).map(e => e.userId).filter(Boolean));
+        for (const ex of (form.executors || [])) {
+          if (ex.userId && !prevExecIds.has(ex.userId)) {
+            sendPush(client, "team_invite", ex.userId, {
+              projectName: saved?.name || form.name,
+              actorName: profile?.name || profile?.email,
+              customText: "Тебя назначили исполнителем проекта",
+            });
+          }
+        }
+      }
+      // v2.1: сохраняем доли участников атомарно через RPC (delete+insert в одной транзакции)
+      if (saved?.id) {
+        const projectId = saved.id;
+        const shareRows = (form.shares || [])
+          .filter(sh => (Number(sh.shareValue) || 0) > 0 && (sh.participantUserId || sh.participantClientId || sh.participantName))
+          .map(sh => ({
+            participant_user_id: sh.participantUserId || null,
+            participant_client_id: sh.participantClientId || null,
+            participant_name: (!sh.participantUserId && !sh.participantClientId) ? (sh.participantName || sh.label || null) : null,
+            participant_label: sh.label || null,
+            share_kind: sh.shareKind === "amount" ? "amount" : "percent",
+            share_value: Number(sh.shareValue) || 0,
+          }));
+        const { error: shErr } = await client.rpc("set_project_shares", { p_project_id: projectId, p_rows: shareRows });
+        if (shErr) throw shErr;
+        // Обновляем кэш долей
+        if (setSharesByProject) {
+          const freshShares = await fetchProjectShares(client);
+          setSharesByProject(freshShares);
         }
       }
       setModal(null);
@@ -2412,6 +2800,22 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                         <span style={{fontSize:10,color:"#6b6b67"}}>{Math.round(paid/contract*100)}%</span>
                       </div>
                     )}
+                    {/* v2.1: индикатор «Моя доля» — только если проект делится на доли */}
+                    {(() => {
+                      const shs = (sharesByProject || {})[p.id] || [];
+                      if (!shs.length || !(contract > 0)) return null;
+                      const others = shs.reduce((acc, sh) => acc + (sh.shareKind === "amount"
+                        ? Number(sh.shareValue) || 0
+                        : contract * (Number(sh.shareValue) || 0) / 100), 0);
+                      const mine = Math.max(0, contract - others);
+                      const pct = Math.round(mine / contract * 100);
+                      return (
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginTop:6,fontSize:11,color:"#6b6b67"}}>
+                          <Users size={12} strokeWidth={2.2}/>
+                          <span>Моя доля: <span style={{color:"#e8c860",fontWeight:600}}>{fmt(mine)} ({pct}%)</span></span>
+                        </div>
+                      );
+                    })()}
                     {/* ═══ КОНТАКТЫ ЗАКАЗЧИКА ═══
                         Показываются как маленькие кликабельные иконки. Каждая
                         открывает соответствующее приложение через спец-протокол:
@@ -2654,7 +3058,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       {modal&&(
         <Modal title={modal==="add"?"Новый проект":"Редактировать проект"} onClose={()=>!saving&&setModal(null)}>
           <ProjectForm
-            initial={modal === "add" ? null : modal}
+            initial={modal === "add" ? null : { ...modal, shares: (sharesByProject || {})[modal.id] || [] }}
             onSave={saveProject}
             onClose={() => setModal(null)}
             saving={saving}
@@ -6528,6 +6932,8 @@ export default function App() {
   const [projects, setProjects]     = useState([]);
   const [txs, setTxs]               = useState([]);
   const [tasks, setTasks]           = useState([]);
+  const [sharesByProject, setSharesByProject] = useState({});
+  const [myShares, setMyShares]     = useState([]);
   const [clients, setClients]       = useState([]); // v1.5
 
   const [reportModal, setReportModal] = useState(false);
@@ -6566,16 +6972,20 @@ export default function App() {
             }
             setUser(session.user);
             setProfile(prof);
-            const [p, t, cl, tk] = await Promise.all([
+            const [p, t, cl, tk, sh, ms] = await Promise.all([
               fetchProjects(supabase),
               fetchTransactions(supabase),
               fetchClients(supabase).catch(() => []),
               fetchTasks(supabase, { assignedTo: prof.id }).catch(() => []),
+              fetchProjectShares(supabase).catch(() => ({})),
+              getMyShares(supabase).catch(() => []),
             ]);
             setProjects(p);
             setTxs(t);
             setClients(cl);
             setTasks(tk);
+            setSharesByProject(sh);
+            setMyShares(ms);
             setPhase("ready");
           } catch (e) {
             console.warn("Сессия есть, но профиль не загружается:", e);
@@ -6607,6 +7017,8 @@ export default function App() {
         setTxs([]);
         setTasks([]);
         setClients([]);
+        setSharesByProject({});
+        setMyShares([]);
         setPhase("auth");
       }
     });
@@ -6618,16 +7030,20 @@ export default function App() {
     setUser(u);
     setProfile(prof);
     try {
-      const [p, t, cl, tk] = await Promise.all([
+      const [p, t, cl, tk, sh, ms] = await Promise.all([
         fetchProjects(supabase),
         fetchTransactions(supabase),
         fetchClients(supabase).catch(() => []),
         fetchTasks(supabase, { assignedTo: prof.id }).catch(() => []),
+        fetchProjectShares(supabase).catch(() => ({})),
+        getMyShares(supabase).catch(() => []),
       ]);
       setProjects(p);
       setTxs(t);
       setClients(cl);
       setTasks(tk);
+      setSharesByProject(sh);
+      setMyShares(ms);
       setPhase("ready");
       showToast(`Добро пожаловать, ${prof.name || prof.email.split("@")[0]}!`);
     } catch (e) {
@@ -7001,8 +7417,8 @@ export default function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
-            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} />}
-            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} />}
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} ownerId={profile.id} />}
+            {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} />}

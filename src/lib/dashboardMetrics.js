@@ -138,15 +138,62 @@ export function expenseByCategory(txs, range, maxSlices = 6) {
   return [...head, { name: 'Прочее', value: other }];
 }
 
-export function receivables(projects) {
+// --- Доли оплаты (кластер #1/#2) ---
+// Доля участника в рублях. share = { shareKind:'percent'|'amount', shareValue:number }.
+export function shareToAmount(share, contractSum) {
+  const v = Number(share.shareValue) || 0;
+  if (share.shareKind === 'amount') return v;
+  return (Number(contractSum) || 0) * v / 100;
+}
+
+// Доля владельца по проекту = договор минус сумма долей других участников (не ниже 0).
+export function ownerShareAmount(project, shares = []) {
+  const contract = Number(project.contractSum) || 0;
+  const others = shares.reduce((s, sh) => s + shareToAmount(sh, contract), 0);
+  return Math.max(0, contract - others);
+}
+
+// Сколько из доли (amount) уже получено, пропорционально оплате договора.
+export function proportionReceived(paidAmount, amount, contractSum) {
+  const c = Number(contractSum) || 0;
+  if (c <= 0) return 0;
+  return (Number(paidAmount) || 0) * (Number(amount) || 0) / c;
+}
+
+// KPI «Получено» владельца: сумма полученного по ЕГО доле в своих проектах (архив исключён).
+export function ownerReceived(projects, sharesByProject = {}, ownerId = null) {
+  let total = 0;
+  for (const p of projects) {
+    if (p.stage === 'Архив') continue;
+    if (ownerId != null && p.ownerId !== ownerId) continue;
+    const amount = ownerShareAmount(p, sharesByProject[p.id] || []);
+    total += proportionReceived(p.paidAmount, amount, p.contractSum);
+  }
+  return total;
+}
+
+export function receivables(projects, sharesByProject = {}, ownerId = null) {
   const items = [];
   for (const p of projects) {
     if (p.stage === 'Архив') continue;
-    const remaining = (Number(p.contractSum) || 0) - (Number(p.paidAmount) || 0);
+    if (ownerId != null && p.ownerId !== ownerId) continue;
+    const amount = ownerShareAmount(p, sharesByProject[p.id] || []);
+    const received = proportionReceived(p.paidAmount, amount, p.contractSum);
+    const remaining = amount - received;
     if (remaining > 0) items.push({ id: p.id, name: p.name, remaining });
   }
   items.sort((a, b) => b.remaining - a.remaining);
   return { total: items.reduce((s, x) => s + x.remaining, 0), items };
+}
+
+// Итоги по моим долям в чужих проектах (вход — результат get_my_shares, уже в camelCase).
+export function mySharesTotals(myShares = []) {
+  let received = 0, receivable = 0;
+  for (const s of myShares) {
+    received += Number(s.myReceived) || 0;
+    receivable += Number(s.myReceivable) || 0;
+  }
+  return { received, receivable };
 }
 
 const TASK_DONE = ['Готово', 'Отменена'];
