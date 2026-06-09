@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "./lib/supabase";
 import { diffLines } from "./lib/lineDiff";
 import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
-import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals } from "./lib/dashboardMetrics";
+import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals, projectIncomeTxs } from "./lib/dashboardMetrics";
 import NotificationBell from "./components/NotificationBell";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -2411,7 +2411,7 @@ function MyTasksCard({ data }) {
 // ════════════════════════════════════════════════════════════════════════════
 // DASHBOARD — главная страница с KPI и графиками
 // ════════════════════════════════════════════════════════════════════════════
-function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [], ownerId = null }) {
+function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, myShares = [], ownerId = null, paymentsByProject = {} }) {
   const [period, setPeriod] = useState("month");
   const range = periodRange(period);
   const prevRange = prevPeriodRange(period);
@@ -2422,11 +2422,15 @@ function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, m
   const totalContract = portfolio.reduce((s, p) => s + (+p.contractSum || 0), 0);
   const totalPaid = portfolio.reduce((s, p) => s + (+p.paidAmount || 0), 0);
 
-  const bal = periodBalance(txs, range);
-  const prevBal = prevRange ? periodBalance(txs, prevRange).balance : null;
+  // Проектные платежи (моя доля) подмешиваем к ручным txs как псевдо-доходы — чтобы
+  // KPI «Доходы»/«Баланс за период» и график считались как на вкладке «Финансы».
+  const allTxs = [...txs, ...projectIncomeTxs(paymentsByProject, projects, sharesByProject, ownerId)];
+
+  const bal = periodBalance(allTxs, range);
+  const prevBal = prevRange ? periodBalance(allTxs, prevRange).balance : null;
   const balanceTrend = trendDir(bal.balance, prevBal);
 
-  const series = financeSeries(txs, range, gran);
+  const series = financeSeries(allTxs, range, gran);
   const expCats = expenseByCategory(txs, range);
   const debt = receivables(projects, sharesByProject, ownerId);
   const sharesTot = mySharesTotals(myShares);
@@ -4521,10 +4525,12 @@ function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], share
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// ANALYTICS — без изменений
+// ANALYTICS
 // ════════════════════════════════════════════════════════════════════════════
-function Analytics({ projects, txs }) {
+function Analytics({ projects, txs, sharesByProject = {}, ownerId = null, paymentsByProject = {} }) {
   const now = new Date();
+  // Проектные платежи (моя доля) как псевдо-доходы — баланс по месяцам как в «Финансах».
+  const allTxs = [...txs, ...projectIncomeTxs(paymentsByProject, projects, sharesByProject, ownerId)];
   const byType = PROJECT_TYPES
     .map(type=>({
       name:type,
@@ -4537,8 +4543,8 @@ function Analytics({ projects, txs }) {
   const months12 = Array.from({length:12},(_,i)=>{
     const d = new Date(now.getFullYear(),now.getMonth()-11+i,1);
     const k = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-    const inc = txs.filter(t=>t.type==="income"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
-    const exp = txs.filter(t=>t.type==="expense"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
+    const inc = allTxs.filter(t=>t.type==="income"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
+    const exp = allTxs.filter(t=>t.type==="expense"&&t.date.startsWith(k)).reduce((s,t)=>s+(+t.amount||0),0);
     return {label:d.toLocaleDateString("ru-RU",{month:"short"}),balance:inc-exp};
   });
 
@@ -7445,12 +7451,12 @@ export default function App() {
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
           >
-            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} ownerId={profile.id} />}
+            {tab === "dashboard" && <Dashboard projects={projects} txs={txs} tasks={tasks} onDrillStage={(stage) => { setPendingStageFilter(stage); setTab("projects"); }} sharesByProject={sharesByProject} myShares={myShares} ownerId={profile.id} paymentsByProject={paymentsByProject} />}
             {tab === "projects" && <Projects projects={projects} setProjects={setProjects} clients={clients} client={supabase} profile={profile} ownerId={profile.id} showToast={showToast} initialStageFilter={pendingStageFilter} sharesByProject={sharesByProject} setSharesByProject={setSharesByProject} pendingProjectId={pendingProjectId} onProjectOpened={() => setPendingProjectId(null)} setPaymentsByProject={setPaymentsByProject} />}
             {tab === "tasks" && <TasksView client={supabase} profile={profile} projects={projects} showToast={showToast} />}
             {tab === "clients" && <ClientsPage clients={clients} setClients={setClients} projects={projects} client={supabase} ownerId={profile.id} showToast={showToast} />}
             {tab === "finance" && <Finance txs={txs} setTxs={setTxs} client={supabase} ownerId={profile.id} showToast={showToast} projects={projects} sharesByProject={sharesByProject} myShares={myShares} paymentsByProject={paymentsByProject} />}
-            {tab === "analytics" && <Analytics projects={projects} txs={txs} />}
+            {tab === "analytics" && <Analytics projects={projects} txs={txs} sharesByProject={sharesByProject} ownerId={profile.id} paymentsByProject={paymentsByProject} />}
             {tab === "admin" && profile?.role === "admin" && <AdminPage profile={profile} client={supabase} showToast={showToast} />}
           </motion.div>
         </AnimatePresence>

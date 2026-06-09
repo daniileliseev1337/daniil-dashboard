@@ -215,6 +215,27 @@ export function myProjectIncomeForMonth(paymentsByProject = {}, projects = [], s
   return total;
 }
 
+// Проектные платежи (моя доля владельца) → псевдо-доходные транзакции для общего
+// финансового потока дашборда/аналитики: { date:paidOn, type:'income', amount:моя доля, category }.
+// Считается ТЕМИ ЖЕ долями-пропорциями, что и myProjectIncomeForMonth/ownerReceived
+// (только мои неархивные проекты с договором). Подмешивается к txs перед periodBalance/
+// financeSeries — KPI, график и вкладка «Финансы» остаются согласованы.
+export function projectIncomeTxs(paymentsByProject = {}, projects = [], sharesByProject = {}, ownerId = null) {
+  const out = [];
+  for (const p of projects) {
+    if (ownerId != null && p.ownerId !== ownerId) continue;
+    if (p.stage === 'Архив') continue;
+    const contract = Number(p.contractSum) || 0;
+    if (contract <= 0) continue;
+    const myShare = ownerShareAmount(p, sharesByProject[p.id] || []);
+    for (const pay of (paymentsByProject[p.id] || [])) {
+      if (!pay.paidOn) continue;
+      out.push({ date: pay.paidOn, type: 'income', amount: (Number(pay.amount) || 0) * myShare / contract, category: 'Проектные доходы' });
+    }
+  }
+  return out;
+}
+
 // Сводка по выбранным проектам (моя доля владельца). breakdown — построчно {id, name, received}.
 export function selectionTotals(selectedProjects = [], sharesByProject = {}, ownerId = null) {
   let received = 0, remaining = 0, contract = 0;

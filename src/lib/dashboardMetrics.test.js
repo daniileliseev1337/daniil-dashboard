@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory, receivables, myTasks, shareToAmount, ownerShareAmount, proportionReceived, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals } from './dashboardMetrics.js';
+import { periodRange, prevPeriodRange, inPeriod, periodBalance, trendDir, granularityFor, financeSeries, expenseByCategory, receivables, myTasks, shareToAmount, ownerShareAmount, proportionReceived, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals, projectIncomeTxs } from './dashboardMetrics.js';
 
 const NOW = new Date('2026-06-06T12:00:00');
 
@@ -330,5 +330,67 @@ describe('selectionTotals', () => {
   });
   it('пустой выбор → нули', () => {
     expect(selectionTotals([], {}, 'me')).toEqual({ received: 0, remaining: 0, contract: 0, breakdown: [] });
+  });
+});
+
+describe('projectIncomeTxs (проектные платежи → псевдо-доходы для дашборда/аналитики)', () => {
+  const projects = [
+    { id: 'p1', ownerId: 'me',    stage: 'В работе', contractSum: 100, paidAmount: 50 },
+    { id: 'p2', ownerId: 'other', stage: 'В работе', contractSum: 100, paidAmount: 50 }, // чужой
+    { id: 'p3', ownerId: 'me',    stage: 'Архив',    contractSum: 100, paidAmount: 50 }, // архив
+    { id: 'p4', ownerId: 'me',    stage: 'В работе', contractSum: 0,   paidAmount: 0 },  // contract=0
+  ];
+  const shares = {};
+  const pays = {
+    p1: [{ amount: 30, paidOn: '2026-06-10' }, { amount: 20, paidOn: '2026-05-01' }],
+    p2: [{ amount: 99, paidOn: '2026-06-10' }],
+    p3: [{ amount: 77, paidOn: '2026-06-10' }],
+    p4: [{ amount: 11, paidOn: '2026-06-10' }],
+  };
+
+  it('возвращает псевдо-доходы только по моим неархивным проектам с договором', () => {
+    const out = projectIncomeTxs(pays, projects, shares, 'me');
+    // только p1 (2 платежа); p2 чужой, p3 архив, p4 contract=0 — отброшены
+    expect(out).toEqual([
+      { date: '2026-06-10', type: 'income', amount: 30, category: 'Проектные доходы' },
+      { date: '2026-05-01', type: 'income', amount: 20, category: 'Проектные доходы' },
+    ]);
+  });
+
+  it('учитывает долю владельца: участник 40% → 60% платежа', () => {
+    const sh = { p1: [{ shareKind: 'percent', shareValue: 40 }] };
+    const out = projectIncomeTxs({ p1: [{ amount: 30, paidOn: '2026-06-10' }] }, projects, sh, 'me');
+    expect(out).toHaveLength(1);
+    expect(out[0].amount).toBeCloseTo(18); // 30 * 60/100
+  });
+
+  it('игнорирует платежи без paidOn', () => {
+    const out = projectIncomeTxs({ p1: [{ amount: 30, paidOn: null }] }, projects, shares, 'me');
+    expect(out).toEqual([]);
+  });
+
+  it('пустой вход → пустой массив', () => {
+    expect(projectIncomeTxs({}, [], {}, 'me')).toEqual([]);
+  });
+
+  // ЗОЛОТОЕ СВОЙСТВО: сумма псевдо-доходов за месяц == myProjectIncomeForMonth за тот же месяц.
+  // Гарантирует, что дашборд/аналитика согласованы с вкладкой «Финансы».
+  it('согласованность с myProjectIncomeForMonth за месяц', () => {
+    const month = '2026-06';
+    const range = { from: '2026-06-01', to: '2026-07-01' };
+    const sh = { p1: [{ shareKind: 'percent', shareValue: 40 }] };
+    const fromTxs = projectIncomeTxs(pays, projects, sh, 'me')
+      .filter(t => inPeriod(t.date, range))
+      .reduce((s, t) => s + t.amount, 0);
+    const fromFinance = myProjectIncomeForMonth(pays, projects, sh, 'me', month);
+    expect(fromTxs).toBeCloseTo(fromFinance);
+  });
+
+  // Воспроизведение бага: «Баланс за период» на дашборде должен включать проектный доход.
+  it('periodBalance([...txs, ...projectIncomeTxs]) включает проектный доход (репро бага #3)', () => {
+    const txs = []; // ручных транзакций нет — как у владельца
+    const range = { from: '2026-06-01', to: '2026-07-01' };
+    const allTxs = [...txs, ...projectIncomeTxs(pays, projects, shares, 'me')];
+    expect(periodBalance(allTxs, range).income).toBe(30); // раньше было бы 0
   });
 });
