@@ -99,6 +99,7 @@ const PALETTE = ["#d4af37","#6ee7a8","#93c5fd","#f8a3a3","#8b5cf6","#ec4899","#f
 // ════════════════════════════════════════════════════════════════════════════
 const fmt      = n  => new Intl.NumberFormat("ru-RU",{style:"currency",currency:"RUB",maximumFractionDigits:0}).format(+n||0);
 const fmtD     = d  => d ? new Date(d+"T00:00:00").toLocaleDateString("ru-RU") : "—";
+const fmtDM    = d  => d ? new Date(d+"T00:00:00").toLocaleDateString("ru-RU",{day:"numeric",month:"short"}) : "—"; // «18 июн.» — компактно для карточек
 const fmtDT    = dt => dt ? new Date(dt).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
 const todayStr = () => new Date().toISOString().slice(0,10);
 const fmtSize  = b  => b >= 1048576 ? `${(b/1048576).toFixed(1)} МБ` : b >= 1024 ? `${(b/1024).toFixed(0)} КБ` : `${b} Б`;
@@ -4428,19 +4429,20 @@ function TaskCardBoard({ t, onOpen, draggable, onDragStart, photos = [], client 
       <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "12px 0" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <UserAvatar name={t.assigneeName} size={26} />
-        <div style={{ minWidth: 0 }}>
+        {/* flex:1 + minWidth:0 — имя/автор честно ужимаются в ellipsis, срок не наезжает */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, color: "#cfd0d4", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {t.assigneeName || "— не назначен"}
           </div>
-          <div style={{ fontSize: 10, color: "#55565c" }}>
-            автор: {t.authorName || "—"} · {fmtD((t.createdAt || "").slice(0, 10))}
+          <div style={{ fontSize: 10, color: "#55565c", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            автор: {t.authorName || "—"} · {fmtDM((t.createdAt || "").slice(0, 10))}
           </div>
         </div>
         <span style={{
-          marginLeft: "auto", fontSize: 11.5, whiteSpace: "nowrap",
+          flexShrink: 0, fontSize: 11.5, whiteSpace: "nowrap",
           color: DUE_COLORS[due.level], fontWeight: due.level === "overdue" ? 700 : 400,
         }}>
-          {t.dueDate ? `📅 ${fmtD(t.dueDate)}${due.days !== null && !done ? ` · ${dueSuffix(due.days)}` : ""}` : "—"}
+          {t.dueDate ? `📅 ${fmtDM(t.dueDate)}${due.days !== null && !done ? ` · ${dueSuffix(due.days)}` : ""}` : "—"}
         </span>
       </div>
     </div>
