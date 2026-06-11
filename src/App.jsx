@@ -4388,7 +4388,7 @@ function TaskRowList({ t, onOpen }) {
 }
 
 // Карточка задачи на доске — стиль B (мокап 2026-06-11). UserAvatar — общий компонент сайта.
-function TaskCardBoard({ t, onOpen, draggable, onDragStart }) {
+function TaskCardBoard({ t, onOpen, draggable, onDragStart, photos = [], client }) {
   const today = todayStr();
   const due = dueState(t.dueDate, today);
   const pm = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META["Обычный"];
@@ -4415,6 +4415,16 @@ function TaskCardBoard({ t, onOpen, draggable, onDragStart }) {
           border: "1px solid #e8c86033", borderRadius: 7, padding: "5px 9px",
         }}>💬 Есть вопрос</div>
       )}
+      {photos.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginTop: 11, alignItems: "center" }}>
+          {photos.slice(0, 3).map(p => (
+            <TaskPhotoThumb key={p.id} photo={p} client={client} size={46} />
+          ))}
+          {photos.length > 3 && (
+            <span style={{ fontSize: 11, color: "#9b9ca4", fontWeight: 700 }}>+{photos.length - 3}</span>
+          )}
+        </div>
+      )}
       <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "12px 0" }} />
       <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
         <UserAvatar name={t.assigneeName} size={26} />
@@ -4437,7 +4447,7 @@ function TaskCardBoard({ t, onOpen, draggable, onDragStart }) {
   );
 }
 
-function TasksBoard({ tasks, onOpen, onReload, client, profile, showToast }) {
+function TasksBoard({ tasks, onOpen, onReload, client, profile, photosByTask = {}, showToast }) {
   // колонки доски — без «Отменена» (намеренно; отменённые видны фильтром в списке)
   const cols = ["Новая", "В работе", "На проверке", "Готово"];
   const [dragId, setDragId] = useState(null);
@@ -4475,7 +4485,8 @@ function TasksBoard({ tasks, onOpen, onReload, client, profile, showToast }) {
             </div>
             <div style={{ padding: 12, background: "rgba(255,255,255,0.012)" }}>
               {colTasks.map(t => (
-                <TaskCardBoard key={t.id} t={t} onOpen={onOpen}
+                <TaskCardBoard key={t.id} t={t} onOpen={onOpen} client={client}
+                  photos={photosByTask[t.id] || []}
                   draggable onDragStart={() => setDragId(t.id)} />
               ))}
               <button onClick={() => onOpen({ status: col, priority: "Обычный" })} style={{
@@ -4493,6 +4504,7 @@ function TasksBoard({ tasks, onOpen, onReload, client, profile, showToast }) {
 
 function TasksView({ client, profile, projects, showToast }) {
   const [tasks, setTasks] = useState([]);
+  const [photosByTask, setPhotosByTask] = useState({});
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("board"); // доска — главный вид (решение владельца)
   const [fProject, setFProject] = useState("");
@@ -4514,6 +4526,8 @@ function TasksView({ client, profile, projects, showToast }) {
         assignedTo: onlyMine ? profile.id : null,
       });
       setTasks(list);
+      try { setPhotosByTask(await fetchTaskPhotosBatch(client, list.map(t => t.id))); }
+      catch { setPhotosByTask({}); } // миниатюры — некритичное украшение
     } catch (e) { showToast("Ошибка загрузки задач: " + (e.message || ""), "error"); }
     finally { setLoading(false); }
   }, [fProject, fStatus, onlyMine, client, profile, showToast, view]);
@@ -4636,7 +4650,7 @@ function TasksView({ client, profile, projects, showToast }) {
         </label>
       </div>
       {loading ? <div className="opacity-60">Загрузка…</div> :
-       view === "board" ? <TasksBoard tasks={shown} onOpen={setEditing} onReload={reload} client={client} profile={profile} showToast={showToast} /> :
+       view === "board" ? <TasksBoard tasks={shown} onOpen={setEditing} onReload={reload} client={client} profile={profile} photosByTask={photosByTask} showToast={showToast} /> :
        <div>
          {listShown.map(t => <TaskRowList key={t.id} t={t} onOpen={setEditing} />)}
          {!listShown.length && <div style={{ color: "#62646b", padding: "24px 0", textAlign: "center" }}>Задач нет</div>}
