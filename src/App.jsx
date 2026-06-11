@@ -4073,6 +4073,34 @@ function TaskModal({ task, client, profile, projects, realtimeTick, onClose, onS
   );
 }
 
+// Строка списка задач — те же данные, что на карточке доски, в одну плотную строку.
+function TaskRowList({ t, onOpen }) {
+  const today = todayStr();
+  const due = dueState(t.dueDate, today);
+  const sm = TASK_STATUS_META[t.status] || { color: "#62646b" };
+  const pm = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META["Обычный"];
+  return (
+    <div onClick={() => onOpen(t)} style={{
+      display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+      background: "#141414", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12,
+      padding: "10px 14px", marginBottom: 8, cursor: "pointer",
+    }}>
+      <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 9px", borderRadius: 20, background: sm.color + "1f", color: sm.color, whiteSpace: "nowrap" }}>{t.status}</span>
+      <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 9px", borderRadius: 20, background: pm.bg, color: pm.color, whiteSpace: "nowrap" }}>{pm.label}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: "#f5f5f2", flex: 1, minWidth: 160 }}>{t.title}</span>
+      <span style={{ fontSize: 12, color: "#9b9ca4", whiteSpace: "nowrap" }}>{t.projectName ? `📁 ${t.projectName}` : "👤 Личная задача"}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#cfd0d4", whiteSpace: "nowrap" }}>
+        <UserAvatar name={t.assigneeName} size={20} />{t.assigneeName || "—"}
+      </span>
+      <span style={{ fontSize: 11, color: "#55565c", whiteSpace: "nowrap" }}>от {fmtD((t.createdAt || "").slice(0, 10))}</span>
+      <span style={{ fontSize: 11.5, color: DUE_COLORS[due.level], fontWeight: due.level === "overdue" ? 700 : 400, whiteSpace: "nowrap", minWidth: 90, textAlign: "right" }}>
+        {t.dueDate ? `📅 ${fmtD(t.dueDate)}${due.days !== null && t.status !== "Готово" ? ` · ${dueSuffix(due.days)}` : ""}` : "—"}
+      </span>
+      {t.hasOpenQuestion && <span title="есть открытый вопрос" style={{ color: "#e8c860", fontSize: 13 }}>💬</span>}
+    </div>
+  );
+}
+
 // Карточка задачи на доске — стиль B (мокап 2026-06-11). UserAvatar — общий компонент сайта.
 function TaskCardBoard({ t, onOpen, draggable, onDragStart }) {
   const today = todayStr();
@@ -4258,6 +4286,21 @@ function TasksView({ client, profile, projects, showToast }) {
   const activeCount = shown.filter(t => t.status !== "Готово" && t.status !== "Отменена").length;
   const attentionCount = tasksAttention(shown, today);
 
+  const listShown = (() => {
+    let arr = shown;
+    if (view === "list" && !fStatus) arr = arr.filter(t => t.status !== "Отменена");
+    return arr.slice().sort((a, b) => {
+      if (sortBy === "priority") return (PRIORITY_ORDER[a.priority] ?? 9) - (PRIORITY_ORDER[b.priority] ?? 9);
+      if (sortBy === "created") return (b.createdAt || "").localeCompare(a.createdAt || "");
+      // 'due': просроченные сверху, потом ближайшие; без срока — вниз
+      const da = dueState(a.dueDate, today).days, db = dueState(b.dueDate, today).days;
+      if (da === null && db === null) return 0;
+      if (da === null) return 1;
+      if (db === null) return -1;
+      return da - db;
+    });
+  })();
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
@@ -4307,22 +4350,9 @@ function TasksView({ client, profile, projects, showToast }) {
       </div>
       {loading ? <div className="opacity-60">Загрузка…</div> :
        view === "board" ? <TasksBoard tasks={shown} onOpen={setEditing} onReload={reload} client={client} profile={profile} showToast={showToast} /> :
-       <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
-         <table className="w-full text-sm" style={{ minWidth: 560 }}>
-           <thead><tr className="text-left opacity-60">
-             <th>Статус</th><th>Задача</th><th>Проект</th><th>Исполнитель</th><th>Приоритет</th><th>Срок</th>
-           </tr></thead>
-           <tbody>
-             {shown.map(t => (
-               <tr key={t.id} onClick={() => setEditing(t)} className="cursor-pointer hover:bg-zinc-800/50">
-                 <td><span className="px-2 py-0.5 rounded text-xs text-white" style={{ background: (TASK_STATUS_META[t.status]||{}).color }}>{t.status}</span></td>
-                 <td>{t.title}</td><td>{t.projectName || "—"}</td><td>{t.assigneeName || "—"}</td>
-                 <td>{t.priority}</td><td>{t.dueDate || "—"}</td>
-               </tr>
-             ))}
-             {!shown.length && <tr><td colSpan={6} className="opacity-60 py-4">Задач нет</td></tr>}
-           </tbody>
-         </table>
+       <div>
+         {listShown.map(t => <TaskRowList key={t.id} t={t} onOpen={setEditing} />)}
+         {!listShown.length && <div style={{ color: "#62646b", padding: "24px 0", textAlign: "center" }}>Задач нет</div>}
        </div>}
       {editing && <TaskModal task={editing} client={client} profile={profile} projects={projects}
                              realtimeTick={openTaskTick}
