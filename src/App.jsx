@@ -1803,24 +1803,26 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         <div><Label>Дедлайн</Label>
           <StyledInput type="date" value={f.deadline} onChange={e => s("deadline", e.target.value)} /></div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div><Label>Сумма договора (₽)</Label>
-          <StyledInput type="number" value={f.contractSum} onChange={e => s("contractSum", e.target.value)} placeholder="0" /></div>
-        <div>
-          <Label>Платежи</Label>
-          {(f.payments || []).map((pay, i) => (
-            // flexWrap + flex-basis: на узком экране поля переносятся, а не схлопываются (моб-баг #1)
-            <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-              <input type="date" value={pay.paidOn || ""} onChange={e => updatePayment(i, "paidOn", e.target.value)} style={{ ...BASE_INPUT, width: "auto", flex: "1 1 130px", minWidth: 0 }} />
-              <StyledInput type="number" value={pay.amount} onChange={e => updatePayment(i, "amount", e.target.value)} placeholder="сумма" style={{ flex: "1 1 90px", minWidth: 0 }} />
-              <StyledInput value={pay.note || ""} onChange={e => updatePayment(i, "note", e.target.value)} placeholder="заметка" style={{ flex: "2 1 120px", minWidth: 0 }} />
-              <button type="button" onClick={() => removePayment(i)} className={BTN.edit} style={{ flexShrink: 0 }}>🗑️</button>
-            </div>
-          ))}
-          <button type="button" onClick={addPayment} className={BTN.edit}>+ платёж</button>
-          <div style={{ fontSize: 12, color: "#a8a8a3", marginTop: 4 }}>
-            Оплачено всего: <span style={{ color: "#6ee7a8", fontWeight: 600 }}>{fmt((f.payments || []).reduce((s, p) => s + (+p.amount || 0), 0))}</span>
+      <div style={{ marginBottom: 12 }}>
+        <Label>Сумма договора (₽)</Label>
+        <StyledInput type="number" value={f.contractSum} onChange={e => s("contractSum", e.target.value)} placeholder="0" />
+      </div>
+      {/* Платежи — отдельная секция на ВСЮ ширину (раньше были зажаты в половину сетки рядом
+          с договором, и поля «сумма»/«заметка» схлопывались в нечитаемые квадраты — моб-баг #1). */}
+      <div style={{ marginBottom: 14 }}>
+        <Label>Платежи</Label>
+        {(f.payments || []).map((pay, i) => (
+          // flexWrap: на узком экране дата/сумма/заметка переносятся, а не схлопываются.
+          <div key={i} style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6, alignItems: "center" }}>
+            <input type="date" value={pay.paidOn || ""} onChange={e => updatePayment(i, "paidOn", e.target.value)} style={{ ...BASE_INPUT, width: "auto", flex: "0 1 150px", minWidth: 130 }} />
+            <StyledInput type="number" value={pay.amount} onChange={e => updatePayment(i, "amount", e.target.value)} placeholder="сумма ₽" style={{ flex: "1 1 110px", minWidth: 90 }} />
+            <StyledInput value={pay.note || ""} onChange={e => updatePayment(i, "note", e.target.value)} placeholder="заметка (необязательно)" style={{ flex: "2 1 160px", minWidth: 120 }} />
+            <button type="button" onClick={() => removePayment(i)} className={BTN.edit} style={{ flexShrink: 0 }} title="Удалить платёж">🗑️</button>
           </div>
+        ))}
+        <button type="button" onClick={addPayment} className={BTN.edit}>+ платёж</button>
+        <div style={{ fontSize: 12, color: "#a8a8a3", marginTop: 4 }}>
+          Оплачено всего: <span style={{ color: "#6ee7a8", fontWeight: 600 }}>{fmt((f.payments || []).reduce((s, p) => s + (+p.amount || 0), 0))}</span>
         </div>
       </div>
 
