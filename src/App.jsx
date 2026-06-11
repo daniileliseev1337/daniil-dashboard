@@ -2773,6 +2773,9 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
         const prevExecIds = new Set(((modal !== "add" ? modal?.executors : null) || []).map(e => e.userId).filter(Boolean));
         for (const ex of (form.executors || [])) {
           if (ex.userId && !prevExecIds.has(ex.userId)) {
+            // замечание C: назначенный исполнитель автоматически в команде с ролью «редактор»
+            // (best-effort: дубль/недостаток прав не должны ронять сохранение проекта)
+            try { await addProjectMember(client, saved.id, ex.userId, "editor"); } catch (e) { /* уже в команде или нет прав */ }
             sendPush(client, "team_invite", ex.userId, {
               projectId: saved?.id,
               projectName: saved?.name || form.name,
@@ -6766,16 +6769,19 @@ function AdminPage({ profile, client, showToast }) {
 // Модальное окно с двумя инструментами:
 //   1. Экспорт текущих данных в JSON (надёжный — через textarea, не window.open)
 //   2. Импорт из JSON-бэкапа (вставка в textarea)
-function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, showToast }) {
+function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, showToast, paymentsByProject = {}, sharesByProject = {} }) {
   const [tab, setTab] = useState("export");        // export | import
   const [importJson, setImportJson] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // C5: бэкап теперь включает платежи и доли (раньше терялись → «Оплачено» обнулялось при импорте).
   const exportJson = JSON.stringify({
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     projects,
     txs,
+    payments: paymentsByProject, // { [projectId]: [{ amount, paidOn }] }
+    shares: sharesByProject,     // { [projectId]: [share...] }
   }, null, 2);
 
   const doImport = async (data) => {
@@ -6787,8 +6793,39 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
       }
       const insertedP = await insertProjectsBulk(client, data.projects, ownerId);
       const insertedT = await insertTransactionsBulk(client, data.txs, ownerId);
+      // C5: восстановить платежи и доли. Проекты создаются с НОВЫМИ id → маппим старый id
+      // проекта (data.projects[i].id) на новый (insertedP[i].id) по позиции (bulk insert
+      // сохраняет порядок VALUES). Best-effort: сбой одного проекта не рушит весь импорт.
+      let restoredPay = 0, restoredSh = 0;
+      for (let i = 0; i < data.projects.length; i++) {
+        const oldId = data.projects[i]?.id;
+        const newId = insertedP[i]?.id;
+        if (!oldId || !newId) continue;
+        const pays = (data.payments || {})[oldId];
+        if (Array.isArray(pays) && pays.length) {
+          try {
+            await setProjectPayments(client, newId, pays.map(p => ({ amount: p.amount, paidOn: p.paidOn, note: p.note || "" })));
+            restoredPay++;
+          } catch (e) { /* не критично */ }
+        }
+        const shs = (data.shares || {})[oldId];
+        if (Array.isArray(shs) && shs.length) {
+          const rows = shs.map(s => ({
+            participant_user_id: s.participantUserId || null,
+            participant_client_id: s.participantClientId || null,
+            participant_name: (!s.participantUserId && !s.participantClientId) ? (s.participantName || null) : null,
+            participant_label: s.participantLabel || s.participantName || null,
+            share_kind: s.shareKind === "amount" ? "amount" : "percent",
+            share_value: Number(s.shareValue) || 0,
+          })).filter(r => r.share_value > 0);
+          if (rows.length) {
+            try { await client.rpc("set_project_shares", { p_project_id: newId, p_rows: rows }); restoredSh++; } catch (e) { /* не критично */ }
+          }
+        }
+      }
       onImported(insertedP, insertedT);
-      showToast(`✓ Импортировано: проектов ${insertedP.length}, транзакций ${insertedT.length}`);
+      const extra = (restoredPay || restoredSh) ? ` (платежи: ${restoredPay}, доли: ${restoredSh})` : "";
+      showToast(`✓ Импортировано: проектов ${insertedP.length}, транзакций ${insertedT.length}${extra}`);
       onClose();
     } catch (e) {
       showToast("Ошибка импорта: " + (e.message || ""), "error");
@@ -6825,8 +6862,8 @@ function BackupPanel({ projects, txs, client, ownerId, onImported, onClose, show
       {tab === "export" && (
         <div>
           <p style={{fontSize:13,color:"#a8a8a3",marginBottom:12,lineHeight:1.5}}>
-            Все твои проекты ({projects.length}) и транзакции ({txs.length}) в формате JSON.
-            Скопируй текст ниже и сохрани в файл — это твоя страховка.
+            Все твои проекты ({projects.length}) и транзакции ({txs.length}) в формате JSON,
+            включая платежи и доли участников. Скопируй текст ниже и сохрани в файл — это твоя страховка.
             Длинный тап по полю → «Выделить всё» → «Копировать».
           </p>
           <StyledTextarea
@@ -7678,6 +7715,8 @@ export default function App() {
         txs={txs}
         client={supabase}
         ownerId={profile.id}
+        paymentsByProject={paymentsByProject}
+        sharesByProject={sharesByProject}
         onImported={handleImported}
         onClose={()=>setBackupModal(false)}
         showToast={showToast}
