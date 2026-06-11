@@ -177,6 +177,7 @@ function taskDbToJs(r) {
     title: r.title, description: r.description ?? "",
     status: r.status, priority: r.priority,
     dueDate: r.due_date, sortOrder: r.sort_order ?? 0,
+    hasOpenQuestion: r.has_open_question ?? false,
     createdAt: r.created_at, updatedAt: r.updated_at,
   };
 }
@@ -4161,7 +4162,7 @@ function TasksView({ client, profile, projects, showToast }) {
           // сохраняем уже известные denormalized-имена из текущего состояния (payload их не несёт)
           const existing = prev.find(t => t.id === mapped.id);
           const merged = existing
-            ? { ...mapped, projectName: mapped.projectName ?? existing.projectName, assigneeName: mapped.assigneeName ?? existing.assigneeName, authorName: mapped.authorName ?? existing.authorName }
+            ? { ...mapped, projectName: mapped.projectName ?? existing.projectName, assigneeName: mapped.assigneeName ?? existing.assigneeName, authorName: mapped.authorName ?? existing.authorName, hasOpenQuestion: existing.hasOpenQuestion }
             : mapped;
           const idx = prev.findIndex(t => t.id === merged.id);
           if (idx === -1) return [merged, ...prev];
