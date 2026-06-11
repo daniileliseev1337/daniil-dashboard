@@ -1566,8 +1566,24 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     executors: [],
     // v3.0 платежи
     payments: [],
+    // №7: черновик команды при СОЗДАНИИ (после insert добавится в project_members)
+    teamDraft: [],
   });
   const s = (k, v) => setF(p => ({ ...p, [k]: v }));
+
+  // №7: autocomplete команды при создании (нет project.id для прямой записи в БД)
+  const [teamQuery, setTeamQuery]     = useState("");
+  const [teamResults, setTeamResults] = useState([]);
+  useEffect(() => {
+    if (!client || !teamQuery.trim()) { setTeamResults([]); return; }
+    const t = setTimeout(async () => {
+      try { setTeamResults(await searchApprovedUsers(client, teamQuery)); } catch { setTeamResults([]); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [teamQuery]); // eslint-disable-line
+  const addTeamDraft = (u) => setF(p => ({ ...p, teamDraft: [...(p.teamDraft || []), { userId: u.id, name: u.name || u.email, email: u.email, role: "editor" }] }));
+  const removeTeamDraft = (i) => setF(p => ({ ...p, teamDraft: (p.teamDraft || []).filter((_, j) => j !== i) }));
+  const setTeamDraftRole = (i, role) => setF(p => ({ ...p, teamDraft: (p.teamDraft || []).map((m, j) => j === i ? { ...m, role } : m) }));
 
   // v2.2: поиск исполнителей (несколько), паттерн как в TasksView
   const [execQuery, setExecQuery]     = useState("");
@@ -2157,8 +2173,8 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
         </div>
       )}
 
-      {/* ═══ СЕКЦИЯ: Команда проекта (v1.5) ═══ */}
-      {initial && initial.id && client && (
+      {/* ═══ СЕКЦИЯ: Команда проекта (v1.5 + №7: видна всегда, черновик при создании) ═══ */}
+      {client && (
         <div style={{
           marginBottom: 14, padding: "12px 14px",
           background: "rgba(212,175,55,0.04)",
@@ -2174,13 +2190,73 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             <Users size={12} strokeWidth={2.4} />
             Команда проекта
           </div>
-          <MembersManager
-            projectId={initial.id}
-            profile={profile}
-            client={client}
-            showToast={showToast}
-            canManage={isOwner || profile?.role === "admin"}
-          />
+
+          {initial && initial.id ? (
+            <MembersManager
+              projectId={initial.id}
+              profile={profile}
+              client={client}
+              showToast={showToast}
+              canManage={isOwner || profile?.role === "admin"}
+            />
+          ) : (
+            /* №7: при создании проекта project_members ещё нет (нет id) — собираем черновик,
+               который saveProject добавит в команду сразу после создания. */
+            <div>
+              {(f.teamDraft || []).length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+                  {(f.teamDraft || []).map((m, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(255,255,255,0.025)", borderRadius: 8, padding: "5px 8px" }}>
+                      <UserAvatar name={m.name} email={m.email} size={24} />
+                      <span style={{ flex: 1, fontSize: 12, color: "#fafaf7", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
+                      <select value={m.role} onChange={e => setTeamDraftRole(i, e.target.value)}
+                        style={{ ...BASE_INPUT, width: "auto", padding: "3px 6px", fontSize: 10, fontWeight: 600 }}>
+                        <option value="viewer">Просмотр</option>
+                        <option value="editor">Редактор</option>
+                      </select>
+                      <button type="button" onClick={() => removeTeamDraft(i)} style={{ background: "none", border: "none", cursor: "pointer", color: "#6b6b67", padding: 2, display: "flex" }}>
+                        <X size={12} strokeWidth={2.4} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div style={{ position: "relative" }}>
+                <StyledInput
+                  value={teamQuery}
+                  onChange={e => setTeamQuery(e.target.value)}
+                  onBlur={() => setTimeout(() => setTeamResults([]), 200)}
+                  placeholder="Добавить участника по имени или email…"
+                  style={{ fontSize: 12 }}
+                />
+                {teamResults.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 50, background: "#1c1c1a", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 8, overflow: "hidden", marginTop: 2 }}>
+                    {teamResults.map(u => {
+                      const added = (f.teamDraft || []).some(m => m.userId === u.id);
+                      return (
+                        <div key={u.id}
+                          onMouseDown={() => { if (!added) { addTeamDraft(u); setTeamQuery(""); setTeamResults([]); } }}
+                          style={{ padding: "8px 12px", cursor: added ? "default" : "pointer", fontSize: 12, borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 8, opacity: added ? 0.45 : 1 }}>
+                          <span style={{ color: "#fafaf7" }}>{u.name || u.email}</span>
+                          {u.name && <span style={{ color: "#6b6b67" }}>{u.email}</span>}
+                          {added
+                            ? <Check size={10} strokeWidth={2} style={{ marginLeft: "auto", color: "#6b6b67" }} />
+                            : <Plus size={10} strokeWidth={2.4} style={{ marginLeft: "auto", color: "#d4af37" }} />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Подсказка: команда даёт доступ только при видимости «Командный» (новая модель RLS) */}
+          {f.visibility !== "team" && (
+            <div style={{ fontSize: 11, color: "#f3d77b", marginTop: 10, lineHeight: 1.45 }}>
+              ⓘ Участники команды увидят проект только при видимости «Командный». Сейчас выбрано «{f.visibility === "marketplace" ? "Маркетплейс" : "Личный"}».
+            </div>
+          )}
         </div>
       )}
 
@@ -2660,6 +2736,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [sortBy, setSortBy]           = useState("default"); // №4: сортировка списка проектов
   const [eyeProject, setEyeProject]   = useState(null);      // №9: «глаз» — кто видит проект
+  const [adminShowAll, setAdminShowAll] = useState(false);   // админ: показать чужие личные проекты
 
   // Открыть карточку проекта по клику из уведомления (Центр уведомлений → onNavigate /projects/<id>).
   useEffect(() => {
@@ -2676,6 +2753,14 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
         saved = await insertProject(client, form, ownerId);
         setProjects(prev => [saved, ...prev]);
         showToast("✓ Проект создан");
+        // №7: участники черновика команды → в project_members сразу после создания (+ уведомление)
+        for (const m of (form.teamDraft || [])) {
+          if (!m.userId) continue;
+          try {
+            await addProjectMember(client, saved.id, m.userId, m.role === "viewer" ? "viewer" : "editor");
+            sendPush(client, "team_invite", m.userId, { projectId: saved.id, projectName: saved.name, actorName: profile?.name || profile?.email, initiatorId: profile?.id });
+          } catch (e) { /* один сбойный участник не должен ронять создание проекта */ }
+        }
       } else {
         saved = await updateProject(client, modal.id, form);
         setProjects(prev => prev.map(p => p.id === saved.id ? saved : p));
@@ -2773,8 +2858,15 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
     contract: { label: "По сумме договора",       fn: (a, b) => (+b.contractSum || 0) - (+a.contractSum || 0) },
     ...(profile?.role === "admin" ? { owner: { label: "По владельцу", fn: (a, b) => (a.ownerId || "").localeCompare(b.ownerId || "") } } : {}),
   };
+  // Админ-фильтр (вариант A): по умолчанию прячем ЧУЖИЕ ЛИЧНЫЕ проекты из списка админа
+  // (RLS даёт ему доступ ко всему). Чип «Все проекты (админ)» снимает фильтр.
+  // Обычные пользователи отфильтрованы самой RLS — их это не касается.
+  const isAdmin = profile?.role === "admin";
+  const visibleForRole = (isAdmin && !adminShowAll)
+    ? visible.filter(p => p.ownerId === profile.id || p.visibility !== "private")
+    : visible;
   const sortFn = SORTS[sortBy]?.fn;
-  const visibleSorted = sortFn ? [...visible].sort(sortFn) : visible;
+  const visibleSorted = sortFn ? [...visibleForRole].sort(sortFn) : visibleForRole;
   const todayS  = todayStr();
 
   return (
@@ -2790,6 +2882,10 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                 active={stageFilter===s} onClick={()=>setStageFilter(s)}/>
             );
           })}
+          {isAdmin && (
+            <Chip label={adminShowAll ? "Скрыть чужие личные" : "Все проекты (админ)"}
+              active={adminShowAll} onClick={()=>setAdminShowAll(v=>!v)}/>
+          )}
         </div>
         <select
           value={sortBy}
