@@ -2666,7 +2666,9 @@ function ProjectVisibilityModal({ project, client, profile, onClose }) {
       try {
         const members = await fetchProjectMembers(client, project.id).catch(() => []);
         // командный ИЛИ свободный маркетплейс → видят ВСЕ одобренные пользователи
-        const broadcast = vis === "team" || (vis === "marketplace" && !project.takenBy);
+        // По новой модели командный виден только команде (project_members), НЕ всем.
+        // «Видят все» осталось ТОЛЬКО у свободного маркетплейса.
+        const broadcast = vis === "marketplace" && !project.takenBy;
         const all = broadcast ? await searchApprovedUsers(client, "").catch(() => []) : [];
         // приоритет причины (меньше = главнее): владелец 0, исполнитель 1, команда 2, broadcast 3
         const map = new Map();
@@ -2679,7 +2681,7 @@ function ProjectVisibilityModal({ project, client, profile, onClose }) {
         if (project.takenBy) put(project.takenBy, project.executor || null, null, "Взял в работу", 1);
         for (const m of members) put(m.user_id, m.name, m.email, m.member_role === "editor" ? "Команда · редактор" : "Команда · просмотр", 2);
         if (broadcast) {
-          const reason = vis === "team" ? "Командный — видят все" : "Маркетплейс — видят все";
+          const reason = "Маркетплейс — видят все";
           for (const u of all) put(u.id, u.name, u.email, reason, 3);
           // search_approved_users исключает самого себя — добавим текущего пользователя вручную
           if (profile?.id) put(profile.id, profile.name || profile.email, profile.email, reason, 3);
