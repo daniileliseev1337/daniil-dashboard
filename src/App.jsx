@@ -8,6 +8,7 @@ import { dueState, dueSuffix, DUE_COLORS, PRIORITY_ORDER, tasksAttention } from 
 import NotificationBell from "./components/NotificationBell";
 import MagneticButton from "./components/MagneticButton";
 import CommandPalette from "./components/CommandPalette";
+import BackgroundCanvas from "./components/BackgroundCanvas";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -8339,6 +8340,7 @@ export default function App() {
 
   if (phase === "auth") return (
     <>
+      <BackgroundCanvas />
       <AuthScreen onAuthenticated={handleAuthenticated} />
       <Toast visible={toast.visible} text={toast.text} type={toast.type}/>
     </>
@@ -8359,10 +8361,11 @@ export default function App() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#0a0a0a",
+      background: "transparent",
       color: "#f7f8f8",
       fontFamily: "'Geist Variable', system-ui, -apple-system, sans-serif",
     }}>
+      <BackgroundCanvas />
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)}
         projects={projects} tasks={tasks} orders={clientProjects} hasClientRole={hasClientRole}

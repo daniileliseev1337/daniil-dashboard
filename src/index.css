@@ -233,24 +233,8 @@ input, textarea, select, button {
 /* Контент над фоновыми слоями */
 #root { position: relative; z-index: 1; }
 
-/* Dotted-grid — тонкая точечная сетка по всему фону */
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-  background-size: 22px 22px;
-}
-
-/* Золотое aurora-свечение (только золото, приглушённое, медленный дрейф) */
-body::after {
-  content: ""; position: fixed; z-index: 0; pointer-events: none;
-  width: 540px; height: 540px; top: -150px; left: -110px; border-radius: 50%;
-  background: var(--gold); filter: blur(120px); opacity: 0.10;
-  animation: aurora-drift 26s ease-in-out infinite;
-}
-@keyframes aurora-drift {
-  0%, 100% { transform: translate(0, 0); }
-  50% { transform: translate(90px, 70px); }
-}
+/* Фон теперь живой — компонент BackgroundCanvas.jsx (canvas: золотой aurora + сеть + искры).
+   Старые body::before (dotted) и body::after (статичная aurora) удалены: их заменяет canvas. */
 
 /* Карточка с премиальным hover: подъём + золотистая слоёная тень */
 .kp-hover-glow {
