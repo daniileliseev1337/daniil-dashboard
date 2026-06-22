@@ -8356,8 +8356,9 @@ export default function App() {
         justifyContent: "space-between",
         flexWrap: "wrap",
         gap: 12,
-        background: "rgba(8,9,15,0.85)",
-        backdropFilter: "blur(8px)",
+        background: "rgba(10,10,12,0.72)",
+        backdropFilter: "blur(16px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(16px) saturate(1.5)",
       }}>
         {/* Логотип */}
         <div>
