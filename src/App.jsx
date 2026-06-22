@@ -3376,7 +3376,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         {visibleSorted.length===0
           ? <Empty text={stageFilter==="Все"?"Нет проектов — нажми «Новый проект»":`Нет проектов со стадией «${stageFilter}»`}/>
-          : visibleSorted.map(p=>{
+          : visibleSorted.map((p,i)=>{
             const meta = STAGE_META[p.stage]||{color:"#d4af37",progress:0};
             const isAwaitingPayment = p.stage==="Сдан заказчику";
             const isOverdue = p.deadline&&p.deadline<todayS&&!["Оплачен","Архив","Сдан заказчику"].includes(p.stage);
@@ -3385,7 +3385,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
             const canEdit   = p.ownerId===profile?.id || profile?.role==="admin" || p.takenBy===profile?.id;
             const canManage = p.ownerId===profile?.id || profile?.role==="admin";
             return (
-              <div key={p.id} style={{background:"#141414",border:"1px solid #141414",borderRadius:16,padding:16}}>
+              <div key={p.id} onMouseMove={spotlightMove} className="kp-card kp-rise" style={{padding:16,animationDelay:`${i*40}ms`}}>
                 <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
                   {selectMode && (
                     <div style={{paddingTop:2,flexShrink:0}} onClick={e => e.stopPropagation()}>
@@ -4803,16 +4803,17 @@ function TaskRowList({ t, onOpen }) {
 }
 
 // Карточка задачи на доске — стиль B (мокап 2026-06-11). UserAvatar — общий компонент сайта.
-function TaskCardBoard({ t, onOpen, draggable, onDragStart, photos = [], client }) {
+function TaskCardBoard({ t, onOpen, draggable, onDragStart, photos = [], client, idx = 0 }) {
   const today = todayStr();
   const due = dueState(t.dueDate, today);
   const pm = TASK_PRIORITY_META[t.priority] || TASK_PRIORITY_META["Обычный"];
   const done = t.status === "Готово";
   return (
     <div draggable={draggable} onDragStart={onDragStart} onClick={() => onOpen(t)}
-      onMouseMove={spotlightMove} className="kp-card"
+      onMouseMove={spotlightMove} className="kp-card kp-rise"
       style={{
         padding: 14, marginBottom: 11, cursor: "pointer", opacity: done ? 0.72 : 1,
+        animationDelay: `${idx * 40}ms`,
       }}>
       <div style={{ marginBottom: 9 }}>
         <span style={{
@@ -4900,8 +4901,8 @@ function TasksBoard({ tasks, onOpen, onReload, client, profile, photosByTask = {
               <span style={{ marginLeft: "auto", fontSize: 11, fontWeight: 800, borderRadius: 20, padding: "1px 9px", background: "rgba(0,0,0,0.3)", color: meta.color }}>{colTasks.length}</span>
             </div>
             <div style={{ padding: 12, background: "rgba(255,255,255,0.012)" }}>
-              {colTasks.map(t => (
-                <TaskCardBoard key={t.id} t={t} onOpen={onOpen} client={client}
+              {colTasks.map((t, i) => (
+                <TaskCardBoard key={t.id} t={t} onOpen={onOpen} client={client} idx={i}
                   photos={photosByTask[t.id] || []}
                   draggable onDragStart={() => setDragId(t.id)} />
               ))}
@@ -5036,7 +5037,7 @@ function TasksView({ client, profile, projects, showToast }) {
               }}>{l}</button>
             ))}
           </div>
-          <button onClick={() => setEditing({ status: "Новая", priority: "Обычный" })} className={BTN.primary}>+ Новая задача</button>
+          <MagneticButton onClick={() => setEditing({ status: "Новая", priority: "Обычный" })} className={BTN.primary}>+ Новая задача</MagneticButton>
         </div>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16, alignItems: "center" }}>
@@ -5459,9 +5460,9 @@ function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], share
         </div>
         <input type="month" value={monthF} onChange={e=>setMonthF(e.target.value)}
           style={{...BASE_INPUT,width:"auto",padding:"4px 12px",fontSize:13}}/>
-        <button onClick={()=>setModal("add")} className={BTN.primary} style={{marginLeft:"auto"}}>
+        <MagneticButton onClick={()=>setModal("add")} className={BTN.primary} style={{marginLeft:"auto"}}>
           + Добавить запись
-        </button>
+        </MagneticButton>
         <button onClick={()=>setCsvModal(true)} style={{
           fontSize:12,padding:"7px 12px",borderRadius:8,cursor:"pointer",fontWeight:600,
           background:"#6ee7a822",border:"1px solid #6ee7a844",color:"#6ee7a8",flexShrink:0,
@@ -5536,8 +5537,7 @@ function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], share
         {filtered.length===0
           ? <Empty text="Нет записей за выбранный период"/>
           : filtered.map(t=>(
-            <div key={t.id} style={{
-              background:"#141414",border:"1px solid #141414",borderRadius:12,
+            <div key={t.id} onMouseMove={spotlightMove} className="kp-card" style={{
               padding:"12px 16px",display:"flex",alignItems:"center",gap:12,
             }}>
               <div style={{width:4,height:36,borderRadius:2,flexShrink:0,
@@ -6905,9 +6905,9 @@ function ClientsPage({ clients, setClients, projects, client, ownerId, showToast
             <Chip key={v} label={l} active={filterType === v} onClick={() => setFilterType(v)} />
           ))}
         </div>
-        <button onClick={() => setModal("add")} className={BTN.primary} style={{ marginLeft: "auto" }}>
+        <MagneticButton onClick={() => setModal("add")} className={BTN.primary} style={{ marginLeft: "auto" }}>
           + Новый клиент
-        </button>
+        </MagneticButton>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -6917,12 +6917,10 @@ function ClientsPage({ clients, setClients, projects, client, ownerId, showToast
               ? "Пока нет клиентов — нажми «Новый клиент»"
               : "Никто не подходит под фильтр"
           } />
-        ) : visible.map(c => (
-          <div key={c.id} style={{
-            background: "#141414",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: 14, padding: 16,
-            transition: "border-color 0.18s",
+        ) : visible.map((c, i) => (
+          <div key={c.id} onMouseMove={spotlightMove} className="kp-card kp-rise" style={{
+            padding: 16,
+            animationDelay: `${i * 40}ms`,
           }}>
             <div style={{ display: "flex", alignItems: "flex-start", gap: 14 }}>
               <UserAvatar name={c.name} size={42} />
@@ -7083,6 +7081,7 @@ function ClientsPage({ clients, setClients, projects, client, ownerId, showToast
 // ════════════════════════════════════════════════════════════════════════════
 function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast }) {
   const [name, setSaveName]      = useState(profile?.name || "");
+  const [position, setPosition]  = useState(profile?.position || "");
   const [saving, setSaving]      = useState(false);
 
   // Notification settings — initialise from profile
@@ -7116,7 +7115,7 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     try {
       const { data, error } = await client
         .from("profiles")
-        .update({ name: name.trim() || null })
+        .update({ name: name.trim() || null, position: position.trim() || null })
         .eq("id", profile.id)
         .select()
         .single();
@@ -7204,6 +7203,7 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
           <div style={{ fontSize: 14, fontWeight: 600, color: "#fafaf7", letterSpacing: "-0.01em" }}>
             {name || profile?.email?.split("@")[0]}
           </div>
+          {position && <div style={{ fontSize: 11.5, color: "#d4af37", marginTop: 2, fontWeight: 500 }}>{position}</div>}
           <div style={{ fontSize: 11, color: "#a8a8a3", marginTop: 2 }}>{profile?.email}</div>
         </div>
         {profile?.role === "admin" && (
@@ -7227,8 +7227,17 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
           onKeyDown={e => { if (e.key === "Enter") save(); }}
         />
       </Field>
+      {/* Должность — необязательное поле, показывается в карточке профиля */}
+      <Field label="Должность">
+        <StyledInput
+          value={position}
+          onChange={e => setPosition(e.target.value)}
+          placeholder="Например: Главный инженер"
+          onKeyDown={e => { if (e.key === "Enter") save(); }}
+        />
+      </Field>
       <div style={{ fontSize: 11, color: "#6b6b67", marginBottom: 16, lineHeight: 1.5 }}>
-        Это имя видят другие участники команды. Email и роль изменить нельзя.
+        Имя и должность видят другие участники команды. Email и роль изменить нельзя.
       </div>
 
       {/* ── Push-уведомления (Web Push, этого устройства) ────────────────── */}
