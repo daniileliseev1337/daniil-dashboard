@@ -1690,7 +1690,15 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
     if (!client || !shareUserQuery.trim()) { setShareUserResults([]); return; }
     const t = setTimeout(async () => {
       const res = await searchApprovedUsers(client, shareUserQuery);
-      setShareUserResults(res);
+      // На ЧУЖОМ проекте (я не владелец) можно назначить долю СЕБЕ — добавляем себя в
+      // результаты (search_approved_users исключает self на сервере). Владелец = остаток,
+      // ему добавлять себя в доли нельзя (иначе ломается расчёт остатка).
+      const q = shareUserQuery.trim().toLowerCase();
+      const selfMatch = profile?.id && !isOwner &&
+        ((profile.name || "").toLowerCase().includes(q) || (profile.email || "").toLowerCase().includes(q));
+      setShareUserResults(selfMatch && !res.some(u => u.id === profile.id)
+        ? [{ id: profile.id, name: profile.name, email: profile.email }, ...res]
+        : res);
     }, 300);
     return () => clearTimeout(t);
   }, [shareUserQuery]); // eslint-disable-line
@@ -1954,7 +1962,7 @@ function ProjectForm({ initial, onSave, onClose, saving, client, profile, showTo
             {/* Список долей: первой строкой — моя доля (остаток), затем участники */}
             {(contractNum > 0 || (f.shares || []).length > 0) && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                {contractNum > 0 && (
+                {contractNum > 0 && isOwner && (
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center", paddingBottom: 4, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                     <span style={{ fontSize: 12, color: "#d4af37", fontWeight: 600, display: "flex", alignItems: "center", gap: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <UserCheck size={12} strokeWidth={2.4} /> Я · остаток
