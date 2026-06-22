@@ -255,6 +255,56 @@ input, textarea, select, button {
 }
 .kp-spotlight:hover::before { opacity: 1; }
 
+/* ──────────────────────────────────────────────────────────────────────────
+   max-wow РЕДИЗАЙН (2026-06-23): живой логотип, золотая «слиток»-рамка, бейдж ⌘K
+   Анимации перелива/блеска — ease-in-out alternate (блик качается, без рывка).
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* «Дыхание» свечения — символ логотипа */
+@keyframes kp-breathe {
+  0%, 100% { box-shadow: 0 0 14px -4px rgba(212,175,55,0.30), inset 0 0 12px rgba(212,175,55,0.10); }
+  50%      { box-shadow: 0 0 30px -2px rgba(232,200,96,0.55), inset 0 0 18px rgba(212,175,55,0.22); }
+}
+.brand-breathe { animation: kp-breathe 4.6s ease-in-out infinite; }
+
+/* Золотой перелив текста логотипа (alternate — блик качается, без рывка) */
+@keyframes kp-shimmer { from { background-position: 0% center; } to { background-position: 220% center; } }
+.brand-shimmer {
+  background: linear-gradient(100deg, var(--gold-soft) 0%, var(--gold) 25%, #fff6d5 50%, var(--gold) 72%, var(--gold-soft) 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: kp-shimmer 4.6s ease-in-out infinite alternate;
+}
+
+/* Золотая «слиток»-рамка карточек: градиент-бордер через mask-composite + бегущий блеск */
+@keyframes kp-ingot { from { background-position: 0% 50%; } to { background-position: 260% 50%; } }
+.gold-ingot { position: relative; }
+.gold-ingot::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1.4px;
+  pointer-events: none; z-index: 3;
+  background: linear-gradient(135deg, var(--gold-soft) 0%, var(--gold) 22%, #fff6d5 46%, var(--gold-bright) 56%, var(--gold) 72%, var(--gold-soft) 100%);
+  background-size: 260% 260%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: .5; animation: kp-ingot 6s ease-in-out infinite alternate;
+}
+.gold-ingot:hover::before { opacity: .9; }
+
+/* Компактный видимый бейдж ⌘K в шапке */
+.cmdk-badge {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 10px; border-radius: 11px; cursor: pointer;
+  background: rgba(212,175,55,0.07); border: 1px solid var(--border-gold-subtle);
+  color: var(--text-secondary); font-size: 12.5px;
+  transition: border-color .25s, color .25s, box-shadow .25s;
+}
+.cmdk-badge:hover { border-color: var(--border-gold); color: var(--text-primary); box-shadow: 0 0 18px -6px var(--gold-glow); }
+.cmdk-badge kbd {
+  font: inherit; font-size: 11.5px; font-weight: 700; padding: 2px 6px; border-radius: 6px;
+  background: linear-gradient(180deg, rgba(212,175,55,0.22), rgba(212,175,55,0.10));
+  border: 1px solid rgba(212,175,55,0.30); color: var(--gold-bright);
+}
+
 /* Motion-дисциплина: уважать prefers-reduced-motion (отключить декор-анимации) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
