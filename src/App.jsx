@@ -8408,8 +8408,6 @@ export default function App() {
         background: "linear-gradient(180deg, rgba(10,10,12,0.72) 0%, rgba(10,10,12,0.36) 60%, rgba(10,10,12,0) 100%)",
         backdropFilter: "blur(14px) saturate(1.3)",
         WebkitBackdropFilter: "blur(14px) saturate(1.3)",
-        maskImage: "linear-gradient(90deg, transparent 0, #000 6%, #000 94%, transparent 100%)",
-        WebkitMaskImage: "linear-gradient(90deg, transparent 0, #000 6%, #000 94%, transparent 100%)",
       }}>
         {/* Логотип */}
         <div style={{ display: "flex", alignItems: "center", gap: 11 }}>

@@ -87,5 +87,5 @@ export default function BackgroundCanvas() {
       if (onResize) window.removeEventListener("resize", onResize);
     };
   }, []);
-  return <canvas ref={ref} id="bg" aria-hidden="true" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: 0, display: "block", pointerEvents: "none" }} />;
+  return <canvas ref={ref} id="bg" aria-hidden="true" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: -1, display: "block", pointerEvents: "none" }} />;
 }
