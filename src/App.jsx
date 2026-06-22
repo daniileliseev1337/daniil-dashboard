@@ -7,6 +7,7 @@ import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, 
 import { dueState, dueSuffix, DUE_COLORS, PRIORITY_ORDER, tasksAttention } from "./lib/taskUi.js";
 import NotificationBell from "./components/NotificationBell";
 import MagneticButton from "./components/MagneticButton";
+import CommandPalette from "./components/CommandPalette";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard, FolderKanban, Wallet, BarChart3,
@@ -8104,6 +8105,16 @@ export default function App() {
   const [clients, setClients]       = useState([]); // v1.5
   const [clientProjects, setClientProjects] = useState([]); // D роль заказчика: мои заказы
   const [hasClientRole, setHasClientRole]   = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false); // Cmd+K командная палитра
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K" || e.key === "л" || e.key === "Л")) {
+        e.preventDefault(); setCmdOpen(o => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const [reportModal, setReportModal] = useState(false);
   const [reportProjects, setReportProjects] = useState(null); // null = все/фильтр по стадии; массив = отчёт по выбранным
@@ -8352,6 +8363,15 @@ export default function App() {
       color: "#f7f8f8",
       fontFamily: "'Geist Variable', system-ui, -apple-system, sans-serif",
     }}>
+
+      <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)}
+        projects={projects} tasks={tasks} orders={clientProjects} hasClientRole={hasClientRole}
+        onNavigate={(it) => {
+          if (it.kind === "section") setTab(it.id);
+          else if (it.kind === "project") { setPendingProjectId(it.id); setTab("projects"); }
+          else if (it.kind === "task") setTab("tasks");
+          else if (it.kind === "order") setTab("myorders");
+        }} />
 
       {/* Вся верхняя зона (шапка + вкладки) прилипает как единый блок — top вкладок
           больше не зависит от переменной высоты шапки (фикс «вкладки уезжают под шапку»). */}
