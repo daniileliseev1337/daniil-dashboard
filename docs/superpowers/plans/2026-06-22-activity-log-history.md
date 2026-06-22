@@ -411,9 +411,9 @@ begin
     into v_old from public.project_payments where project_id = p_project_id;
   delete from public.project_payments where project_id = p_project_id;
   insert into public.project_payments (project_id, amount, paid_on, note, created_by)
-  select p_project_id, (r->>'amount')::numeric, (r->>'paid_on')::date, nullif(r->>'note',''), auth.uid()
-  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) r
-  where (r->>'amount') is not null and (r->>'amount')::numeric > 0 and (r->>'paid_on') is not null;
+  select p_project_id, (je->>'amount')::numeric, (je->>'paid_on')::date, nullif(je->>'note',''), auth.uid()
+  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) je
+  where (je->>'amount') is not null and (je->>'amount')::numeric > 0 and (je->>'paid_on') is not null;
   select coalesce(jsonb_agg(jsonb_build_object('amount', amount::text, 'paid_on', paid_on::text)), '[]'::jsonb)
     into v_new from public.project_payments where project_id = p_project_id;
   -- added = new \ old
@@ -452,10 +452,10 @@ begin
   insert into public.project_shares
     (project_id, participant_user_id, participant_client_id, participant_name, participant_label, share_kind, share_value)
   select p_project_id,
-    nullif(r->>'participant_user_id','')::uuid, nullif(r->>'participant_client_id','')::uuid,
-    nullif(r->>'participant_name',''), nullif(r->>'participant_label',''),
-    r->>'share_kind', (r->>'share_value')::numeric
-  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) as r;
+    nullif(je->>'participant_user_id','')::uuid, nullif(je->>'participant_client_id','')::uuid,
+    nullif(je->>'participant_name',''), nullif(je->>'participant_label',''),
+    je->>'share_kind', (je->>'share_value')::numeric
+  from jsonb_array_elements(coalesce(p_rows, '[]'::jsonb)) as je;
 
   -- added: участник появился (ключ = coalesce user/client/name)
   for r in
