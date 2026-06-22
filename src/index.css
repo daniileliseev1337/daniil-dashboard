@@ -225,3 +225,50 @@ input, textarea, select, button {
 .spring-press:active {
   transform: scale(0.97);
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   PREMIUM-DARK РЕДИЗАЙН (2026-06-22): фон + motion-дисциплина
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Контент над фоновыми слоями */
+#root { position: relative; z-index: 1; }
+
+/* Dotted-grid — тонкая точечная сетка по всему фону */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+/* Золотое aurora-свечение (только золото, приглушённое, медленный дрейф) */
+body::after {
+  content: ""; position: fixed; z-index: 0; pointer-events: none;
+  width: 540px; height: 540px; top: -150px; left: -110px; border-radius: 50%;
+  background: var(--gold); filter: blur(120px); opacity: 0.10;
+  animation: aurora-drift 26s ease-in-out infinite;
+}
+@keyframes aurora-drift {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(90px, 70px); }
+}
+
+/* Карточка с премиальным hover: подъём + золотистая слоёная тень */
+.kp-hover-glow {
+  transition: transform 0.18s cubic-bezier(.2,.7,.3,1), box-shadow 0.18s, border-color 0.18s;
+}
+.kp-hover-glow:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-gold);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 28px -6px var(--gold-glow);
+}
+
+/* Motion-дисциплина: уважать prefers-reduced-motion (отключить декор-анимации) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .kp-hover-glow:hover { transform: none; }
+}
