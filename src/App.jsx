@@ -8399,19 +8399,36 @@ export default function App() {
 
       {/* Шапка с логотипом, действиями и информацией о пользователе */}
       <div style={{
-        borderBottom: "1px solid rgba(255,255,255,0.06)",
-        padding: isMobile ? "12px 14px" : "14px 24px",
+        padding: isMobile ? "12px 14px" : "16px 24px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
         flexWrap: "wrap",
         gap: 12,
-        background: "rgba(10,10,12,0.72)",
-        backdropFilter: "blur(16px) saturate(1.5)",
-        WebkitBackdropFilter: "blur(16px) saturate(1.5)",
+        background: "linear-gradient(180deg, rgba(10,10,12,0.72) 0%, rgba(10,10,12,0.36) 60%, rgba(10,10,12,0) 100%)",
+        backdropFilter: "blur(14px) saturate(1.3)",
+        WebkitBackdropFilter: "blur(14px) saturate(1.3)",
+        maskImage: "linear-gradient(90deg, transparent 0, #000 6%, #000 94%, transparent 100%)",
+        WebkitMaskImage: "linear-gradient(90deg, transparent 0, #000 6%, #000 94%, transparent 100%)",
       }}>
         {/* Логотип */}
-        <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+          <div className="brand-breathe" style={{
+            width: 40, height: 40, flex: "0 0 auto",
+            display: "grid", placeItems: "center", borderRadius: 12,
+            background: "radial-gradient(120% 120% at 30% 20%, rgba(232,200,96,0.20), rgba(212,175,55,0.05))",
+            border: "1px solid rgba(212,175,55,0.40)",
+          }}>
+            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <defs><linearGradient id="kpg" x1="0" y1="0" x2="24" y2="24">
+                <stop offset="0" stopColor="#f6e7a8"/><stop offset="0.6" stopColor="#d4af37"/><stop offset="1" stopColor="#9c7c22"/>
+              </linearGradient></defs>
+              <path d="M3 12a4 4 0 0 1 4-4h9a3 3 0 1 0-3-3"/>
+              <path d="M3 17h13a3 3 0 1 1-3 3"/>
+              <path d="M3 7h4"/>
+            </svg>
+          </div>
+          <div>
           <h1 style={{
             margin: 0,
             fontSize: 17,
@@ -8421,12 +8438,7 @@ export default function App() {
             alignItems: "center",
             gap: 8,
           }}>
-            <span style={{
-              background: "linear-gradient(135deg, #d4af37, #e8c860)",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
-            }}>КЛИМАТ-ПРО</span>
+            <span className="brand-shimmer">КЛИМАТ-ПРО</span>
             <span style={{
               color: "#62646b",
               fontWeight: 400,
@@ -8440,11 +8452,17 @@ export default function App() {
             opacity: 0.6,
             marginTop: 2,
           }}>Проектирование систем ОВиК<br/>Нам важно чем вы дышите.</div>
+          </div>
         </div>
 
         {/* Правая часть: кнопки действий и информация о пользователе */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: isMobile ? "flex-start" : "flex-end", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
+            {/* Бейдж командной палитры — открывает CommandPalette (хоткей Ctrl/Cmd+K) */}
+            <div className="cmdk-badge" onClick={() => setCmdOpen(true)} title="Поиск и команды (Ctrl+K)">
+              {!isMobile && <span>Поиск</span>}
+              <kbd>⌘K</kbd>
+            </div>
             {/* Колокольчик Центра уведомлений */}
             <NotificationBell
               client={supabase}
