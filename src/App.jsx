@@ -2855,7 +2855,7 @@ function Dashboard({ projects, txs, tasks, onDrillStage, sharesByProject = {}, m
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
                     <XAxis dataKey="label" tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "#62646b", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}к` : v} />
-                    <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v, n) => [fmt(v), n === "inc" ? "Доходы" : "Расходы"]} />
+                    <Tooltip cursor={{ fill: "rgba(212,175,55,0.06)" }} contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v, n) => [fmt(v), n === "inc" ? "Доходы" : "Расходы"]} />
                     <Bar dataKey="inc" name="inc" fill="#d4af37" radius={[5, 5, 0, 0]} />
                     <Bar dataKey="exp" name="exp" fill="#f8a3a3" radius={[5, 5, 0, 0]} />
                   </BarChart>
@@ -3399,7 +3399,7 @@ function Projects({ projects, setProjects, clients, client, profile, ownerId, sh
                   )}
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",flexWrap:"wrap",alignItems:"center",gap:8,marginBottom:6}}>
-                      <span style={{color:"white",fontWeight:700,fontSize:15}}>{p.name}</span>
+                      <span style={{color:"white",fontWeight:700,fontSize:15,overflowWrap:"anywhere",wordBreak:"break-word",minWidth:0}}>{p.name}</span>
                       <span onClick={canEdit?(e)=>openQE(e,p.id,"stage"):undefined}
                         style={{fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:600,
                         background:meta.color+"22",color:meta.color,cursor:canEdit?"pointer":"default",
@@ -5376,6 +5376,7 @@ function CsvImportModal({ onClose, onImport }) {
 // FINANCE
 // ════════════════════════════════════════════════════════════════════════════
 function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], sharesByProject = {}, myShares = [], paymentsByProject = {} }) {
+  const isMobile = useIsMobile(); // моб: пироги/гриды сворачиваем в колонку на телефоне
   const [modal, setModal]           = useState(null);
   const [typeFilter, setTypeFilter] = useState("all");
   const [monthF, setMonthF]         = useState(todayStr().slice(0,7));
@@ -5500,17 +5501,17 @@ function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], share
       </div>
 
       {(incByCatFull.length>0||expByCat.length>0)&&(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:16,marginBottom:16}}>
           {incByCatFull.length>0&&(
             <Card>
               <SectionTitle>Источники доходов</SectionTitle>
-              <ResponsiveContainer width="100%" height={160}>
+              <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
-                  <Pie data={incByCatFull} cx="50%" cy="50%" innerRadius={38} outerRadius={62} dataKey="value" paddingAngle={2}>
+                  <Pie data={incByCatFull} cx="50%" cy="40%" innerRadius={30} outerRadius={52} dataKey="value" paddingAngle={2}>
                     {incByCatFull.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
                   <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n]}/>
-                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
+                  <Legend iconType="circle" iconSize={7} verticalAlign="bottom" wrapperStyle={{paddingTop:6,fontSize:10,lineHeight:"15px"}} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
             </Card>
@@ -5518,13 +5519,13 @@ function Finance({ txs, setTxs, client, ownerId, showToast, projects = [], share
           {expByCat.length>0&&(
             <Card>
               <SectionTitle>Структура расходов</SectionTitle>
-              <ResponsiveContainer width="100%" height={160}>
+              <ResponsiveContainer width="100%" height={240}>
                 <PieChart>
-                  <Pie data={expByCat} cx="50%" cy="50%" innerRadius={38} outerRadius={62} dataKey="value" paddingAngle={2}>
+                  <Pie data={expByCat} cx="50%" cy="40%" innerRadius={30} outerRadius={52} dataKey="value" paddingAngle={2}>
                     {expByCat.map((_,i)=><Cell key={i} fill={PALETTE[i%PALETTE.length]} stroke="transparent"/>)}
                   </Pie>
                   <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n]}/>
-                  <Legend iconType="circle" iconSize={7} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
+                  <Legend iconType="circle" iconSize={7} verticalAlign="bottom" wrapperStyle={{paddingTop:6,fontSize:10,lineHeight:"15px"}} formatter={v=><span style={{fontSize:10,color:"#a8a8a3"}}>{v}</span>}/>
                 </PieChart>
               </ResponsiveContainer>
             </Card>
@@ -5638,7 +5639,7 @@ function Analytics({ projects, txs, sharesByProject = {}, ownerId = null, paymen
               <XAxis type="number" tick={{fill:"#6b6b67",fontSize:10}} axisLine={false} tickLine={false}
                 tickFormatter={v=>v>=1000?`${(v/1000).toFixed(0)}к`:v}/>
               <YAxis type="category" dataKey="name" tick={{fill:"#a8a8a3",fontSize:11}} width={165} axisLine={false} tickLine={false}/>
-              <Tooltip contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n==="contract"?"Договор":"Оплачено"]}/>
+              <Tooltip cursor={{ fill: "rgba(212,175,55,0.06)" }} contentStyle={tt} itemStyle={{ color: "#fafaf7" }} formatter={(v,n)=>[fmt(v),n==="contract"?"Договор":"Оплачено"]}/>
               <Bar dataKey="contract" name="contract" fill="#d4af37" radius={[0,4,4,0]}/>
               <Bar dataKey="paid"     name="paid"     fill="#6ee7a8" radius={[0,4,4,0]}/>
             </BarChart>
@@ -8595,7 +8596,9 @@ export default function App() {
               onMouseOver={e => { e.currentTarget.style.background = "rgba(110,231,168,0.18)"; }}
               onMouseOut={e => { e.currentTarget.style.background = "rgba(110,231,168,0.10)"; }}
             >
-              <Cloud size={11} strokeWidth={2.2} />
+              <span style={{ width: 19, height: 19, borderRadius: "50%", background: "rgba(110,231,168,0.18)", border: "1px solid rgba(110,231,168,0.35)", fontSize: 9.5, fontWeight: 800, letterSpacing: "0.02em", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#6ee7a8" }}>
+                {((profile?.name || profile?.email || "?").trim().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join("") || "?").toUpperCase()}
+              </span>
               <span style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", lineHeight: 1.15 }}>
                 <span>{profile?.name || profile?.email}</span>
                 {profile?.position && <span style={{ fontSize: 9.5, color: "#d4af37", fontWeight: 600 }}>{profile.position}</span>}
