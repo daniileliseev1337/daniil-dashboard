@@ -27,9 +27,9 @@ export default function BackgroundCanvas() {
       };
       onScroll = () => { tgtScroll = window.scrollY || window.pageYOffset || 0; };
       const blobs = [
-        { x: 0.16, y: 0.20, r: 340, a: 0.10, sx: 0.00007, sy: 0.00005, p: 0 },
-        { x: 0.82, y: 0.30, r: 300, a: 0.08, sx: 0.00005, sy: 0.00008, p: 2.1 },
-        { x: 0.55, y: 0.85, r: 380, a: 0.07, sx: 0.00006, sy: 0.00004, p: 4.0 },
+        { x: 0.16, y: 0.20, r: 360, a: 0.15, sx: 0.00007, sy: 0.00005, p: 0 },
+        { x: 0.82, y: 0.30, r: 320, a: 0.12, sx: 0.00005, sy: 0.00008, p: 2.1 },
+        { x: 0.55, y: 0.85, r: 400, a: 0.11, sx: 0.00006, sy: 0.00004, p: 4.0 },
       ];
       function build() {
         nodes = [];
@@ -53,13 +53,13 @@ export default function BackgroundCanvas() {
         ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
         ctx.globalCompositeOperation = "lighter";
         // Сглаженный (инерционный) отклик на курсор/скролл — параллакс блобов по глубине.
-        easeX += (tgtX - easeX) * 0.06; easeY += (tgtY - easeY) * 0.06;
+        easeX += (tgtX - easeX) * 0.085; easeY += (tgtY - easeY) * 0.085;
         easeScroll += (tgtScroll - easeScroll) * 0.08;
         const pX = easeX - 0.5, pY = easeY - 0.5;
         const sShift = (easeScroll * 0.05) % 90;
         for (let bi = 0; bi < blobs.length; bi++) {
           const b = blobs[bi];
-          const depth = 50 + bi * 34;
+          const depth = 120 + bi * 70;
           const cx = (b.x + Math.sin(t * b.sx + b.p) * 0.06) * W + pX * depth;
           const cy = (b.y + Math.cos(t * b.sy + b.p) * 0.06) * H + pY * depth - sShift * (0.4 + bi * 0.25);
           const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, b.r);

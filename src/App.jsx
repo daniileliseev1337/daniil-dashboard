@@ -1222,6 +1222,71 @@ async function reloadToLatest() {
   window.location.reload();
 }
 
+// Живой логотип: значок плавно сменяется по кругу (A·B·C·F·L) или показывает один
+// выбранный (настройка устройства localStorage('kp-logo'); меняется в Профиле).
+// Обводка — золотой градиент url(#kpg). По умолчанию — ротация.
+const LOGO_ORDER = ["A", "B", "C", "F", "L"];
+function LogoMark() {
+  const ICONS = {
+    A: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <g className="kpl-flow"><path d="M3 12a4 4 0 0 1 4-4h9a3 3 0 1 0-3-3" /><path d="M3 17h13a3 3 0 1 1-3 3" /><path d="M3 7h4" /></g>
+      </svg>
+    ),
+    B: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <g className="kpl-spin"><path d="M10.827 16.379a6.082 6.082 0 0 1-8.618-7.002l5.412 1.45a6.082 6.082 0 0 1 7.002-8.618l-1.45 5.412a6.082 6.082 0 0 1 8.618 7.002l-5.412-1.45a6.082 6.082 0 0 1-7.002 8.618z" /></g>
+        <circle cx="12" cy="12" r="1.4" fill="url(#kpg)" stroke="none" />
+      </svg>
+    ),
+    C: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <g className="kpl-cold"><path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9L4.9 19.1" /></g>
+        <g className="kpl-warm"><circle cx="12" cy="12" r="3.6" /><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6" /></g>
+      </svg>
+    ),
+    F: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-5h-6v5H5a1 1 0 0 1-1-1z" />
+        <path className="kpl-flow" d="M7 12h6a1.6 1.6 0 1 0-1.6-1.6" />
+      </svg>
+    ),
+    L: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 11l8-6 8 6v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1z" />
+        <path className="kpl-beat" d="M12 17.6s-3-2-3-4.1A1.6 1.6 0 0 1 12 12.1 1.6 1.6 0 0 1 15 13.5c0 2.1-3 4.1-3 4.1z" fill="url(#kpg)" stroke="none" />
+      </svg>
+    ),
+  };
+  const [mode, setMode] = useState(() => { try { return localStorage.getItem("kp-logo") || "rotate"; } catch { return "rotate"; } });
+  useEffect(() => {
+    const onChange = (e) => setMode((e && e.detail) || "rotate");
+    window.addEventListener("kp-logo", onChange);
+    return () => window.removeEventListener("kp-logo", onChange);
+  }, []);
+  const single = LOGO_ORDER.indexOf(mode);
+  const [idx, setIdx] = useState(single >= 0 ? single : 0);
+  useEffect(() => {
+    if (single >= 0) { setIdx(single); return; }
+    setIdx(0);
+    if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = setInterval(() => setIdx((i) => (i + 1) % LOGO_ORDER.length), 6000); // медленно и изящно
+    return () => clearInterval(t);
+  }, [single]);
+  return (
+    <div style={{ position: "relative", width: 22, height: 22 }}>
+      <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden="true"><defs>
+        <linearGradient id="kpg" x1="0" y1="0" x2="24" y2="24">
+          <stop offset="0" stopColor="#f6e7a8" /><stop offset="0.6" stopColor="#d4af37" /><stop offset="1" stopColor="#9c7c22" />
+        </linearGradient>
+      </defs></svg>
+      {LOGO_ORDER.map((id, i) => (
+        <div key={id} style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", opacity: i === idx ? 1 : 0, transition: "opacity 1.4s ease-in-out" }}>{ICONS[id]}</div>
+      ))}
+    </div>
+  );
+}
+
 function Card({ children, style = {}, glass = false }) {
   if (glass) {
     return (
@@ -1572,16 +1637,16 @@ function AuthScreen({ onAuthenticated, onError }) {
             opacity: 0.6,
             marginBottom: 6,
           }}>
-            Проектирование систем ОВиК<br/>Нам важно чем вы дышите.
+            Проектирование систем ОВиК<br/>Заботимся о тех, кто внутри
           </div>
           <div style={{
             fontSize: 11,
-            color: "var(--text-tertiary)",
+            color: "var(--gold-bright)",
             textTransform: "uppercase",
             letterSpacing: "0.14em",
-            fontWeight: 500,
+            fontWeight: 600,
           }}>
-            Искусство климата, инженерия комфорта
+            Климат, рассчитанный профессионально
           </div>
         </div>
 
@@ -7112,6 +7177,13 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
     const v = !hc; setHc(v);
     try { document.documentElement.classList.toggle("hc", v); localStorage.setItem("kp-hc", v ? "1" : "0"); } catch {}
   };
+  // Логотип — per-device: 'rotate' (плавная смена по кругу) или один из значков.
+  const [logoMode, setLogoMode] = useState(() => { try { return localStorage.getItem("kp-logo") || "rotate"; } catch { return "rotate"; } });
+  const setLogo = (m) => {
+    setLogoMode(m);
+    try { localStorage.setItem("kp-logo", m); } catch {}
+    try { window.dispatchEvent(new CustomEvent("kp-logo", { detail: m })); } catch {}
+  };
 
   // Notification settings — initialise from profile
   const [notifs, setNotifs] = useState({
@@ -7289,6 +7361,28 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
         </div>
         <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "8px 0 0", lineHeight: 1.5 }}>
           Высокий контраст уже включён у всех. Этот режим — для слабых или старых Android-экранов: делает стекло плотным, убирает размытие и 3D-наклон, рисует сплошные золотые рамки — чтобы всё точно читалось и отображалось. Действует только на этом устройстве.
+        </p>
+      </div>
+
+      {/* ── Логотип (этого устройства) ─────────────────────────────────── */}
+      <div style={{
+        marginBottom: 16, padding: "12px 14px", borderRadius: 10,
+        background: "var(--gold-bg-subtle)", border: "1px solid var(--border-gold-subtle)",
+      }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>Логотип</span>
+        <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          {[["rotate", "Все ↻"], ["A", "Воздух"], ["B", "Вентилятор"], ["C", "Тепло/Холод"], ["F", "Дом+поток"], ["L", "Дом+сердце"]].map(([m, lbl]) => (
+            <button key={m} onClick={() => setLogo(m)} style={{
+              fontSize: 11, padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit",
+              transition: "all .18s",
+              background: logoMode === m ? "var(--gold-bg)" : "rgba(255,255,255,0.04)",
+              border: "1px solid " + (logoMode === m ? "var(--border-gold)" : "var(--border-subtle)"),
+              color: logoMode === m ? "var(--gold-bright)" : "var(--text-secondary)",
+            }}>{lbl}</button>
+          ))}
+        </div>
+        <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "8px 0 0", lineHeight: 1.5 }}>
+          «Все ↻» — значок плавно меняется по кругу. Или выберите один. Настройка только этого устройства.
         </p>
       </div>
 
@@ -8503,14 +8597,7 @@ export default function App() {
             background: "radial-gradient(120% 120% at 30% 20%, rgba(232,200,96,0.20), rgba(212,175,55,0.05))",
             border: "1px solid rgba(212,175,55,0.40)",
           }}>
-            <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="url(#kpg)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-              <defs><linearGradient id="kpg" x1="0" y1="0" x2="24" y2="24">
-                <stop offset="0" stopColor="#f6e7a8"/><stop offset="0.6" stopColor="#d4af37"/><stop offset="1" stopColor="#9c7c22"/>
-              </linearGradient></defs>
-              <path d="M3 12a4 4 0 0 1 4-4h9a3 3 0 1 0-3-3"/>
-              <path d="M3 17h13a3 3 0 1 1-3 3"/>
-              <path d="M3 7h4"/>
-            </svg>
+            <LogoMark />
           </div>
           <div>
           <h1 style={{
@@ -8523,19 +8610,19 @@ export default function App() {
             gap: 8,
           }}>
             <span className="brand-shimmer">КЛИМАТ-ПРО</span>
-            <span style={{
-              color: "var(--text-tertiary)",
-              fontWeight: 400,
+            <span className="brand-static-gold" style={{
+              fontWeight: 500,
               fontSize: 13,
-            }}>· Искусство климата, инженерия комфорта</span>
+            }}>· климат, рассчитанный профессионально</span>
           </h1>
+          <div className="brand-hair" />
           <div style={{
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            fontWeight: 500,
-            opacity: 0.6,
-            marginTop: 2,
-          }}>Проектирование систем ОВиК<br/>Нам важно чем вы дышите.</div>
+            fontSize: 10.5,
+            color: "var(--gold-soft)",
+            fontWeight: 600,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+          }}>Заботимся о тех, кто внутри</div>
           </div>
         </div>
 

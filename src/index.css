@@ -20,45 +20,45 @@
 @tailwind utilities;
 
 :root {
-  /* БАЗОВЫЙ РЕЖИМ = ВЫСОКИЙ КОНТРАСТ (раньше был опц. .hc, теперь дефолт для всех).
-     Премиально-тусклые значения заменены на яркие/контрастные. Откат — вернуть прежние hex.
-     Доп-режим «Android / макс. чёткость» (.hc ниже) усиливает контраст ещё сильнее. */
+  /* Премиальная чёрно-золотая база. «Контраст» владельца = ЯРКИЕ блестящие золотые
+     рамки карточек (см. opacity у .kp-card/.gold-ingot ::before ниже), а НЕ осветление фона.
+     Осветление палитры вынесено в опц. режим «Android / макс. чёткость» (.hc ниже). */
   /* ── ПОВЕРХНОСТИ ─────────────────────────────────────────────────────── */
   /* Базовый фон — чистый чёрный с минимальной тёплой смягчённостью.
      Отличается от абсолютной темноты на 2-3% яркости, что даёт
      ощущение материального чёрного, а не выключенного экрана. */
-  --bg-base: #050505;
+  --bg-base: #0a0a0a;
 
   /* Карточки — едва светлее фона, чтобы создавать ощущение поднятости
      без визуальной полосатости интерфейса. */
-  --bg-elevated: #242420;
+  --bg-elevated: #141414;
 
   /* Модальные окна и поднятые элементы — ещё на ступень светлее.
      Плюс лёгкая тёплая нотка для ощущения подсветки. */
-  --bg-higher: #2e2e29;
+  --bg-higher: #1c1c1a;
 
   /* Стеклянный эффект для премиальных карточек */
   --bg-glass: rgba(255, 255, 255, 0.025);
 
   /* ── ГРАНИЦЫ ─────────────────────────────────────────────────────────── */
-  --border-subtle: rgba(255, 255, 255, 0.16);
-  --border-default: rgba(255, 255, 255, 0.24);
-  --border-strong: rgba(255, 255, 255, 0.34);
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.16);
   --border-gold-subtle: rgba(212, 175, 55, 0.15);
   --border-gold: rgba(212, 175, 55, 0.30);
 
   /* ── ТЕКСТ ───────────────────────────────────────────────────────────── */
   /* Тёплый почти-белый — гармонирует с золотым акцентом и не утомляет */
-  --text-primary: #ffffff;
-  --text-secondary: #dcdcd6;
-  --text-tertiary: #adada5;
-  --text-quaternary: #6a6a66;
+  --text-primary: #fafaf7;
+  --text-secondary: #a8a8a3;
+  --text-tertiary: #6b6b67;
+  --text-quaternary: #404040;
 
   /* ── ЗОЛОТОЙ АКЦЕНТ ──────────────────────────────────────────────────── */
   /* Антикварное золото — благородный приглушённый оттенок,
      близкий к настоящему металлу с лёгкой патиной. */
-  --gold: #e6c65c;
-  --gold-bright: #f1da7e;       /* для hover-состояний */
+  --gold: #d4af37;
+  --gold-bright: #e8c860;       /* для hover-состояний */
   --gold-soft: #c9a431;          /* для границ и акцентов */
   --gold-bg-subtle: rgba(212, 175, 55, 0.06);
   --gold-bg: rgba(212, 175, 55, 0.12);
@@ -267,8 +267,8 @@ input, textarea, select, button {
 
 /* «Дыхание» свечения — символ логотипа */
 @keyframes kp-breathe {
-  0%, 100% { box-shadow: 0 0 14px -4px rgba(212,175,55,0.30), inset 0 0 12px rgba(212,175,55,0.10); }
-  50%      { box-shadow: 0 0 30px -2px rgba(232,200,96,0.55), inset 0 0 18px rgba(212,175,55,0.22); }
+  0%, 100% { box-shadow: 0 0 18px -3px rgba(232,200,96,0.45), inset 0 0 14px rgba(212,175,55,0.16); }
+  50%      { box-shadow: 0 0 42px 0 rgba(246,231,168,0.78), inset 0 0 24px rgba(232,200,96,0.32); }
 }
 .brand-breathe { animation: kp-breathe 4.6s ease-in-out infinite; }
 
@@ -291,7 +291,7 @@ input, textarea, select, button {
   background-size: 260% 260%;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  opacity: .5; animation: kp-ingot 6s ease-in-out infinite alternate;
+  opacity: .85; animation: kp-ingot 6s ease-in-out infinite alternate;
 }
 .gold-ingot:hover::before { opacity: .9; }
 
@@ -315,7 +315,11 @@ input, textarea, select, button {
    Применять className="kp-card" к контейнерам карточек на экранах. */
 .kp-card {
   position: relative;
-  background: var(--bg-elevated);
+  /* iPhone-style «liquid glass»: тёмное полупрозрачное стекло — сквозь него виден
+     живой золотой фон, но текст остаётся читаемым (в отличие от молочного светлого). */
+  background: linear-gradient(135deg, rgba(30,30,27,0.58), rgba(18,18,16,0.42));
+  backdrop-filter: blur(11px) saturate(1.55);
+  -webkit-backdrop-filter: blur(11px) saturate(1.55);
   border-radius: 14px;
   border: 1px solid var(--border-subtle);
   transition: transform 0.18s cubic-bezier(.2,.7,.3,1), box-shadow 0.18s, border-color 0.18s;
@@ -327,7 +331,7 @@ input, textarea, select, button {
   background-size: 260% 260%;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  opacity: .42; animation: kp-ingot 6s ease-in-out infinite alternate;
+  opacity: .8; animation: kp-ingot 6s ease-in-out infinite alternate;
 }
 .kp-card::after {
   content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: 0;
@@ -335,7 +339,7 @@ input, textarea, select, button {
   background: radial-gradient(360px circle at var(--mx, 50%) var(--my, 50%), rgba(212,175,55,0.10), transparent 60%);
 }
 .kp-card:hover { transform: translateY(-3px); border-color: var(--border-gold); box-shadow: 0 16px 40px rgba(0,0,0,0.5), 0 0 26px -8px var(--gold-glow); }
-.kp-card:hover::before { opacity: .85; }
+.kp-card:hover::before { opacity: .95; }
 .kp-card:hover::after { opacity: 1; }
 
 /* Фолбэк для браузеров без mask-composite (старый Android WebView / Chrome):
@@ -361,6 +365,30 @@ input, textarea, select, button {
 }
 .kp-update-glow { animation: kp-update-pulse 1.8s ease-in-out infinite; }
 
+/* ── Логотип-ротация: внутренние анимации значков (обводка — золото url(#kpg)) ── */
+@keyframes kpl-flow { to { stroke-dashoffset: -32; } }
+@keyframes kpl-spin { to { transform: rotate(360deg); } }
+@keyframes kpl-tc { 0%, 42% { opacity: 1; } 58%, 100% { opacity: 0; } }
+@keyframes kpl-beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.15); } }
+.kpl-flow { stroke-dasharray: 9 7; animation: kpl-flow 2s linear infinite; }
+.kpl-spin { transform-origin: 12px 12px; animation: kpl-spin 4.4s linear infinite; }
+.kpl-cold { animation: kpl-tc 5s ease-in-out infinite; }
+.kpl-warm { animation: kpl-tc 5s ease-in-out infinite reverse; }
+.kpl-beat { transform-origin: 12px 14.5px; animation: kpl-beat 1.8s ease-in-out infinite; }
+
+/* Слоган №1 — благородное СТАТИЧНОЕ золото (антик, без перелива) + мягкое свечение.
+   Не жёлтый: глубокие золотые стопы, лёгкий блик в середине. */
+.brand-static-gold {
+  background: linear-gradient(100deg, #a9821f, #d4af37 45%, #ead27a 58%, #c9a431 78%, #a9821f);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 7px rgba(212, 175, 55, 0.30));
+}
+/* Тонкая золотая «перовая» линия (слоган №2 живёт под ней) */
+.brand-hair {
+  height: 1px; width: 248px; max-width: 58vw; margin: 6px 0 5px;
+  background: linear-gradient(90deg, rgba(212,175,55,.6), rgba(212,175,55,0));
+}
+
 /* Motion-дисциплина: уважать prefers-reduced-motion (отключить декор-анимации) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -381,31 +409,33 @@ input, textarea, select, button {
 
 /* ──────────────────────────────────────────────────────────────────────────
    РЕЖИМ «Android / МАКСИМАЛЬНАЯ ЧЁТКОСТЬ» (.hc на <html>) — per-device тумблер
-   в «Профиле», localStorage('kp-hc'). Высокий контраст уже базовый (в :root выше);
-   этот режим усиливает его ещё и «обезвреживает» эффекты, ненадёжные на слабых/старых
-   Android-браузерах: плотное непрозрачное стекло без размытия, без 3D-наклона карточек,
-   сплошные золотые рамки вместо градиентных (mask-composite там может не работать).
-   ────────────────────────────────────────────────────────────────────────── */
+   в «Профиле», localStorage('kp-hc'). Осветляет палитру (для тусклых матриц),
+   делает стекло плотным/без размытия и отключает 3D-наклон. Золотые рамки НЕ трогаем —
+   они остаются яркими (где mask-composite не поддержан — их подменяет @supports-фолбэк выше). */
 .hc {
+  --bg-base: #050505;
+  --bg-elevated: #242420;
+  --bg-higher: #2e2e29;
+  --text-primary: #ffffff;
   --text-secondary: #ededed;
   --text-tertiary: #c8c8c2;
-  --border-subtle: rgba(255, 255, 255, 0.30);
-  --border-default: rgba(255, 255, 255, 0.44);
-  --border-strong: rgba(255, 255, 255, 0.58);
+  --text-quaternary: #7a7a74;
+  --border-subtle: rgba(255, 255, 255, 0.22);
+  --border-default: rgba(255, 255, 255, 0.34);
+  --border-strong: rgba(255, 255, 255, 0.48);
   --gold: #f1da7e;
   --gold-bright: #f7e7a0;
 }
-/* Плотное непрозрачное стекло — без размытия и прозрачности (чёткость на слабых матрицах) */
-.hc .glass-card {
+/* Плотное непрозрачное стекло — без размытия (чёткость на слабых матрицах) */
+.hc .glass-card,
+.hc .kp-card {
   background: var(--bg-elevated);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-/* Сплошные золотые рамки вместо градиентных (mask-composite ненадёжен на старом Android) */
+/* Золотые рамки — ярче в этом режиме (НЕ скрываем — иначе на ПК рамки пропадали) */
 .hc .kp-card::before,
-.hc .gold-ingot::before { display: none; }
-.hc .kp-card,
-.hc .gold-ingot { border: 1px solid var(--gold); }
+.hc .gold-ingot::before { opacity: .95; }
 /* Без 3D-наклона — он растеризует карточку в текстуру и мылит цифры. CSS !important
    перебивает inline-transform от JS (tiltMove); сам JS тоже проверяет .hc и не наклоняет. */
 .hc .kp-card,
