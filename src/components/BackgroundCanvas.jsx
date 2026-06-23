@@ -10,13 +10,22 @@ export default function BackgroundCanvas() {
     if (!canvas) return;
     let raf = 0;
     let stopped = false;
-    let onResize = null;
+    let onResize = null, onPointer = null, onScroll = null;
     try {
       const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const ctx = canvas.getContext("2d");
       let W = window.innerWidth, H = window.innerHeight;
       const DPR = Math.min(window.devicePixelRatio || 1, 2);
       let nodes = [], sparks = [];
+      // Интерактивность: блобы фона мягко тянутся к курсору (десктоп) и
+      // реагируют на скролл/касание (мобайл) — «живой» отклик на пользователя.
+      let tgtX = 0.5, tgtY = 0.5, easeX = 0.5, easeY = 0.5, tgtScroll = 0, easeScroll = 0;
+      onPointer = e => {
+        const x = e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : null);
+        const y = e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : null);
+        if (x != null && W) { tgtX = x / W; tgtY = y / H; }
+      };
+      onScroll = () => { tgtScroll = window.scrollY || window.pageYOffset || 0; };
       const blobs = [
         { x: 0.16, y: 0.20, r: 340, a: 0.10, sx: 0.00007, sy: 0.00005, p: 0 },
         { x: 0.82, y: 0.30, r: 300, a: 0.08, sx: 0.00005, sy: 0.00008, p: 2.1 },
@@ -43,9 +52,16 @@ export default function BackgroundCanvas() {
         bg.addColorStop(0, "#0a0a0a"); bg.addColorStop(1, "#0c0b08");
         ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
         ctx.globalCompositeOperation = "lighter";
-        for (const b of blobs) {
-          const cx = (b.x + Math.sin(t * b.sx + b.p) * 0.06) * W;
-          const cy = (b.y + Math.cos(t * b.sy + b.p) * 0.06) * H;
+        // Сглаженный (инерционный) отклик на курсор/скролл — параллакс блобов по глубине.
+        easeX += (tgtX - easeX) * 0.06; easeY += (tgtY - easeY) * 0.06;
+        easeScroll += (tgtScroll - easeScroll) * 0.08;
+        const pX = easeX - 0.5, pY = easeY - 0.5;
+        const sShift = (easeScroll * 0.05) % 90;
+        for (let bi = 0; bi < blobs.length; bi++) {
+          const b = blobs[bi];
+          const depth = 50 + bi * 34;
+          const cx = (b.x + Math.sin(t * b.sx + b.p) * 0.06) * W + pX * depth;
+          const cy = (b.y + Math.cos(t * b.sy + b.p) * 0.06) * H + pY * depth - sShift * (0.4 + bi * 0.25);
           const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, b.r);
           g.addColorStop(0, "rgba(212,175,55," + b.a + ")");
           g.addColorStop(0.5, "rgba(240,216,120," + b.a * 0.5 + ")");
@@ -76,6 +92,11 @@ export default function BackgroundCanvas() {
       }
       onResize = resize;
       window.addEventListener("resize", resize);
+      if (!reduce) {
+        window.addEventListener("pointermove", onPointer, { passive: true });
+        window.addEventListener("touchmove", onPointer, { passive: true });
+        window.addEventListener("scroll", onScroll, { passive: true });
+      }
       resize();
       if (reduce) frame(4000); else raf = requestAnimationFrame(frame);
     } catch (e) {
@@ -85,6 +106,8 @@ export default function BackgroundCanvas() {
       stopped = true;
       if (raf) cancelAnimationFrame(raf);
       if (onResize) window.removeEventListener("resize", onResize);
+      if (onPointer) { window.removeEventListener("pointermove", onPointer); window.removeEventListener("touchmove", onPointer); }
+      if (onScroll) window.removeEventListener("scroll", onScroll);
     };
   }, []);
   return <canvas ref={ref} id="bg" aria-hidden="true" style={{ position: "fixed", inset: 0, width: "100%", height: "100%", zIndex: -1, display: "block", pointerEvents: "none" }} />;
