@@ -1191,8 +1191,6 @@ function tiltMove(e) {
   el.style.setProperty("--mx", `${e.clientX - r.left}px`);
   el.style.setProperty("--my", `${e.clientY - r.top}px`);
   if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  // Режим «Android / макс. чёткость»: без наклона — 3D-transform растеризует карточку и мылит цифры.
-  if (document.documentElement.classList.contains("hc")) return;
   const ry = (px - 0.5) * 7;
   const rx = -(py - 0.5) * 7;
   el.style.transform = `perspective(1100px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateY(-2px)`;
@@ -7341,13 +7339,13 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
         Имя и должность видят другие участники команды. Email и роль изменить нельзя.
       </div>
 
-      {/* ── Режим «Android / макс. чёткость» (этого устройства) ──────────── */}
+      {/* ── Режим «Повышение контрастности» (этого устройства) ──────────── */}
       <div style={{
         marginBottom: 16, padding: "12px 14px", borderRadius: 10,
         background: "var(--gold-bg-subtle)", border: "1px solid var(--border-gold-subtle)",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>Android / макс. чёткость</span>
+          <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>Повышение контрастности</span>
           <button onClick={toggleHc} aria-pressed={hc} style={{
             width: 36, height: 20, borderRadius: 10, border: "none", cursor: "pointer",
             transition: "all 0.2s", padding: 0, flexShrink: 0,
@@ -7360,7 +7358,7 @@ function ProfileModal({ profile, client, onClose, onProfileUpdated, showToast })
           </button>
         </div>
         <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "8px 0 0", lineHeight: 1.5 }}>
-          Высокий контраст уже включён у всех. Этот режим — для слабых или старых Android-экранов: делает стекло плотным, убирает размытие и 3D-наклон, рисует сплошные золотые рамки — чтобы всё точно читалось и отображалось. Действует только на этом устройстве.
+          Делает текст белым, а палитру — ярче на этом устройстве: для большей читаемости. Действует только на этом устройстве.
         </p>
       </div>
 

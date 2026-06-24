@@ -408,10 +408,9 @@ input, textarea, select, button {
 #report-print-area .recharts-cartesian-axis-tick text { fill: #555 !important; }
 
 /* ──────────────────────────────────────────────────────────────────────────
-   РЕЖИМ «Android / МАКСИМАЛЬНАЯ ЧЁТКОСТЬ» (.hc на <html>) — per-device тумблер
-   в «Профиле», localStorage('kp-hc'). Осветляет палитру (для тусклых матриц),
-   делает стекло плотным/без размытия и отключает 3D-наклон. Золотые рамки НЕ трогаем —
-   они остаются яркими (где mask-composite не поддержан — их подменяет @supports-фолбэк выше). */
+   РЕЖИМ «ПОВЫШЕНИЕ КОНТРАСТНОСТИ» (.hc на <html>) — per-device тумблер
+   в «Профиле», localStorage('kp-hc'). Только осветляет палитру: белый текст, ярче фоны,
+   границы и золото (включая золотые рамки). Стекло и 3D-наклон НЕ трогает. */
 .hc {
   --bg-base: #050505;
   --bg-elevated: #242420;
@@ -426,18 +425,6 @@ input, textarea, select, button {
   --gold: #f1da7e;
   --gold-bright: #f7e7a0;
 }
-/* Плотное непрозрачное стекло — без размытия (чёткость на слабых матрицах) */
-.hc .glass-card,
-.hc .kp-card {
-  background: var(--bg-elevated);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
 /* Золотые рамки — ярче в этом режиме (НЕ скрываем — иначе на ПК рамки пропадали) */
 .hc .kp-card::before,
 .hc .gold-ingot::before { opacity: .95; }
-/* Без 3D-наклона — он растеризует карточку в текстуру и мылит цифры. CSS !important
-   перебивает inline-transform от JS (tiltMove); сам JS тоже проверяет .hc и не наклоняет. */
-.hc .kp-card,
-.hc .glass-card,
-.hc .gold-ingot { transform: none !important; }
