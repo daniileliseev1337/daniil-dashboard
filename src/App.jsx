@@ -631,6 +631,17 @@ async function setClientUser(client, clientId, userId) {
   const { error } = await client.rpc("set_client_user", { p_client_id: clientId, p_user_id: userId });
   if (error) throw error;
 }
+// Система ролей (Ф1): роли текущего пользователя (employee/client/visitor).
+async function fetchMyRoles(client) {
+  const { data, error } = await client.rpc("get_my_roles");
+  if (error) return [];
+  return (data || []).map(r => r.role);
+}
+// Система ролей (Ф1): админ задаёт набор ролей пользователю (полная замена).
+async function adminSetUserRoles(client, userId, roles) {
+  const { error } = await client.rpc("set_user_roles", { p_user_id: userId, p_roles: roles });
+  if (error) throw error;
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // ADMIN (v1.5) — административные операции
@@ -7457,6 +7468,7 @@ function AdminPage({ profile, client, showToast }) {
   const [section, setSection] = useState("users");
   const [users, setUsers] = useState([]);
   const [stats, setStats] = useState(null);
+  const [rolesByUser, setRolesByUser] = useState({}); // Система ролей Ф1: user_id -> [roles]
   const [activity, setActivity] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -7471,6 +7483,12 @@ function AdminPage({ profile, client, showToast }) {
     try {
       if (section === "users") {
         setUsers(await adminListUsers(client));
+        try {
+          const { data: rr } = await client.from("user_roles").select("user_id, role");
+          const map = {};
+          (rr || []).forEach(x => { (map[x.user_id] = map[x.user_id] || []).push(x.role); });
+          setRolesByUser(map);
+        } catch { setRolesByUser({}); }
       } else if (section === "stats") {
         setStats(await adminSystemStats(client));
       } else if (section === "activity") {
@@ -7628,6 +7646,24 @@ function AdminPage({ profile, client, showToast }) {
                       {u.projects_count} проектов · {u.transactions_count} транзакций
                       {u.created_at && <> · с {new Date(u.created_at).toLocaleDateString("ru-RU")}</>}
                     </div>
+                    {u.id !== profile.id && (
+                      <div style={{ display: "flex", gap: 10, marginTop: 5, flexWrap: "wrap" }}>
+                        {[["employee","Сотрудник"],["client","Заказчик"],["visitor","Посетитель"]].map(([r, label]) => {
+                          const has = (rolesByUser[u.id] || []).includes(r);
+                          return (
+                            <label key={r} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 500, color: has ? "#d4af37" : "var(--text-tertiary)", cursor: "pointer" }}>
+                              <input type="checkbox" checked={has} onChange={async () => {
+                                const cur = rolesByUser[u.id] || [];
+                                const next = has ? cur.filter(x => x !== r) : [...cur, r];
+                                try { await adminSetUserRoles(client, u.id, next); reload(); }
+                                catch (e) { showToast("Ошибка ролей: " + (e.message || ""), "error"); }
+                              }} />
+                              {label}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                   {u.id !== profile.id && (
                     <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
@@ -8301,6 +8337,8 @@ export default function App() {
   const [clients, setClients]       = useState([]); // v1.5
   const [clientProjects, setClientProjects] = useState([]); // D роль заказчика: мои заказы
   const [hasClientRole, setHasClientRole]   = useState(false);
+  const [myRoles, setMyRoles]       = useState([]); // Система ролей Ф1: роли текущего пользователя
+  const [viewMode, setViewMode]     = useState(() => { try { return localStorage.getItem("km_view_mode") || "work"; } catch { return "work"; } }); // 'work' | 'client'
   const [cmdOpen, setCmdOpen] = useState(false); // Cmd+K командная палитра
   useEffect(() => {
     const onKey = (e) => {
@@ -8349,7 +8387,7 @@ export default function App() {
             }
             setUser(session.user);
             setProfile(prof);
-            const [p, t, cl, tk, sh, ms, pb, cp, icr] = await Promise.all([
+            const [p, t, cl, tk, sh, ms, pb, cp, icr, rl] = await Promise.all([
               fetchProjects(supabase).catch(() => []),
               fetchTransactions(supabase).catch(() => []),
               fetchClients(supabase).catch(() => []),
@@ -8359,6 +8397,7 @@ export default function App() {
               fetchMyPayments(supabase).catch(() => ({})),
               fetchMyClientProjects(supabase).catch(() => []),
               amIClient(supabase).catch(() => false),
+              fetchMyRoles(supabase).catch(() => []),
             ]);
             setProjects(p);
             setTxs(t);
@@ -8369,6 +8408,7 @@ export default function App() {
             setPaymentsByProject(pb);
             setClientProjects(cp);
             setHasClientRole(icr);
+            setMyRoles(rl);
             setPhase("ready");
           } catch (e) {
             console.warn("Сессия есть, но профиль не загружается:", e);
@@ -8414,7 +8454,7 @@ export default function App() {
     setUser(u);
     setProfile(prof);
     try {
-      const [p, t, cl, tk, sh, ms, pb, cp, icr] = await Promise.all([
+      const [p, t, cl, tk, sh, ms, pb, cp, icr, rl] = await Promise.all([
         fetchProjects(supabase),
         fetchTransactions(supabase),
         fetchClients(supabase).catch(() => []),
@@ -8424,6 +8464,7 @@ export default function App() {
         fetchMyPayments(supabase).catch(() => ({})),
         fetchMyClientProjects(supabase).catch(() => []),
         amIClient(supabase).catch(() => false),
+        fetchMyRoles(supabase).catch(() => []),
       ]);
       setProjects(p);
       setTxs(t);
@@ -8434,6 +8475,7 @@ export default function App() {
       setPaymentsByProject(pb);
       setClientProjects(cp);
       setHasClientRole(icr);
+      setMyRoles(rl);
       setPhase("ready");
       showToast(`Добро пожаловать, ${prof.name || prof.email.split("@")[0]}!`);
     } catch (e) {
@@ -8542,7 +8584,12 @@ export default function App() {
   );
 
   // phase === "ready"
-  const TABS = [
+  // Система ролей Ф1: переключатель вида доступен, если есть и рабочая роль (employee/admin), и client.
+  const canSwitchView = myRoles.includes("client") && (myRoles.includes("employee") || profile?.role === "admin");
+  const clientView = canSwitchView && viewMode === "client";
+  const TABS = clientView
+    ? [{ id: "myorders", label: "Мои заказы", Icon: Package }]
+    : [
     { id: "dashboard", label: "Дашборд",   Icon: LayoutDashboard },
     { id: "projects",  label: "Проекты",   Icon: FolderKanban },
     { id: "tasks",     label: "Задачи",    Icon: ListTodo },
@@ -8627,6 +8674,14 @@ export default function App() {
         {/* Правая часть: кнопки действий и информация о пользователе */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: isMobile ? "flex-start" : "flex-end", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: isMobile ? "flex-start" : "flex-end" }}>
+            {/* Система ролей Ф1: переключатель вида (если есть рабочая роль и роль заказчика) */}
+            {canSwitchView && (
+              <button onClick={() => { const m = viewMode === "client" ? "work" : "client"; setViewMode(m); try { localStorage.setItem("km_view_mode", m); } catch {} ; setTab(m === "client" ? "myorders" : "dashboard"); }}
+                title="Переключить вид: кабинет сотрудника / портал заказчика"
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, background: "rgba(212,175,55,0.10)", border: "1px solid rgba(212,175,55,0.30)", color: "#d4af37" }}>
+                {viewMode === "client" ? "Портал заказчика" : "Кабинет сотрудника"}
+              </button>
+            )}
             {/* Бейдж командной палитры — открывает CommandPalette (хоткей Ctrl/Cmd+K) */}
             <div className="cmdk-badge" onClick={() => setCmdOpen(true)} title="Поиск и команды (Ctrl+K)">
               {!isMobile && <span>Поиск</span>}
