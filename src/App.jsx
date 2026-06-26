@@ -1014,8 +1014,11 @@ async function signInWithPassword(client, email, password) {
   return data;
 }
 
-async function signUpWithPassword(client, email, password) {
-  const { data, error } = await client.auth.signUp({ email, password });
+async function signUpWithPassword(client, email, password, meta) {
+  const { data, error } = await client.auth.signUp({
+    email, password,
+    ...(meta ? { options: { data: meta } } : {}),
+  });
   if (error) throw error;
   return data;
 }
@@ -1025,16 +1028,41 @@ async function signOut(client) {
 }
 
 // Перевод стандартных ошибок Supabase в дружелюбные русские сообщения
-function translateAuthError(err) {
+function translateAuthError(err, ctx) {
   const msg = (err?.message || "").toLowerCase();
-  if (msg.includes("invalid login credentials"))     return "Неверный email или пароль";
-  if (msg.includes("email not confirmed"))           return "Email не подтверждён — проверь почту";
-  if (msg.includes("user already registered"))       return "Пользователь с таким email уже существует";
+  if (msg.includes("invalid login credentials"))     return "Неверный логин или пароль";
+  if (msg.includes("email not confirmed"))           return "Аккаунт не подтверждён — обратитесь к администратору";
+  if (msg.includes("user already registered"))       return ctx === "signup" ? "Этот логин уже занят" : "Аккаунт уже существует";
+  if (msg.includes("duplicate key") || msg.includes("unique constraint") || msg.includes("profiles_username"))
+                                                     return "Этот логин уже занят";
   if (msg.includes("password should be at least"))   return "Пароль слишком короткий (минимум 6 символов)";
-  if (msg.includes("invalid email"))                 return "Неверный формат email";
+  if (msg.includes("validate email") || msg.includes("invalid email") || msg.includes("invalid format"))
+                                                     return ctx === "signup"
+                                                       ? "Логин отклонён сервером — попробуй другой (только латиница/цифры)"
+                                                       : "Неверный логин или email";
   if (msg.includes("rate limit"))                    return "Слишком много попыток. Подожди минуту";
   if (msg.includes("network") || msg.includes("fetch")) return "Нет связи с сервером. Проверь интернет";
   return err?.message || "Произошла ошибка";
+}
+
+// ── Ф2: вход по username. Синтетический email <username>@klimat.local под капотом GoTrue. ──
+const SYNTH_EMAIL_DOMAIN = "@klimat.local";
+function isSynthEmail(email) {
+  return typeof email === "string" && email.toLowerCase().endsWith(SYNTH_EMAIL_DOMAIN);
+}
+// Email → отображаемый логин: синтетический показываем как "@username", реальный — как есть.
+function displayLogin(email) {
+  if (!email) return "";
+  return isSynthEmail(email) ? "@" + email.slice(0, -SYNTH_EMAIL_DOMAIN.length) : email;
+}
+// Ввод поля входа → email для GoTrue. Без "@" → username (вариант А: email-вход сохраняется).
+function loginIdToEmail(id) {
+  const v = (id || "").trim();
+  return v.includes("@") ? v.toLowerCase() : `${v.toLowerCase()}${SYNTH_EMAIL_DOMAIN}`;
+}
+// Username: 3–32 символа, латиница/цифры/подчёркивание/дефис.
+function validateUsername(u) {
+  return /^[a-z0-9_-]{3,32}$/.test(u || "");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1556,22 +1584,22 @@ function KpiCard({ label, value, sub, color = "#d4af37", Icon, format, trend }) 
 // с соответствующим сообщением.
 function AuthScreen({ onAuthenticated, onError }) {
   const [mode, setMode] = useState("signin");        // signin | signup | check_email
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");        // вход: логин или email (вариант А)
+  const [username, setUsername] = useState("");      // регистрация: логин
+  const [name, setName] = useState("");              // регистрация: отображаемое имя
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const submit = async () => {
-    if (!email.trim() || !password) {
-      setError("Заполни email и пароль");
-      return;
-    }
-    setLoading(true);
+    const client = supabase;
     setError(null);
-    try {
-      const client = supabase;
-      if (mode === "signin") {
-        const { user, session } = await signInWithPassword(client, email.trim(), password);
+    if (mode === "signin") {
+      if (!loginId.trim() || !password) { setError("Введи логин и пароль"); return; }
+      setLoading(true);
+      try {
+        const email = loginIdToEmail(loginId);
+        const { user, session } = await signInWithPassword(client, email, password);
         if (!user || !session) throw new Error("Не удалось получить сессию");
         // Проверяем профиль и одобрение
         const profile = await fetchProfile(client, user.id);
@@ -1580,15 +1608,28 @@ function AuthScreen({ onAuthenticated, onError }) {
           throw new Error("Аккаунт ожидает одобрения администратором");
         }
         onAuthenticated(user, profile);
-      } else {
-        // Регистрация: autoconfirm включён (письма нет) — аккаунт создаётся и ждёт одобрения админом
-        await signUpWithPassword(client, email.trim(), password);
-        setMode("check_email");
+      } catch (e) {
+        setError(translateAuthError(e, "login"));
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      setError(translateAuthError(e));
-    } finally {
-      setLoading(false);
+    } else {
+      // Регистрация по логину (вариант А): синтетический email <username>@klimat.local.
+      // autoconfirm включён (письма нет) — аккаунт создаётся и ждёт одобрения админом.
+      const uname = username.trim().toLowerCase();
+      if (!name.trim()) { setError("Укажи имя"); return; }
+      if (!validateUsername(uname)) { setError("Логин: 3–32 символа, латиница, цифры, _ или -"); return; }
+      if (!password) { setError("Введи пароль"); return; }
+      setLoading(true);
+      try {
+        const email = `${uname}${SYNTH_EMAIL_DOMAIN}`;
+        await signUpWithPassword(client, email, password, { username: uname, name: name.trim() });
+        setMode("check_email");
+      } catch (e) {
+        setError(translateAuthError(e, "signup"));
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -1685,7 +1726,7 @@ function AuthScreen({ onAuthenticated, onError }) {
                 Заявка отправлена
               </div>
               <p style={{ fontSize: 13, color: "var(--text-secondary)", marginBottom: 20, lineHeight: 1.55 }}>
-                Аккаунт <span style={{ color: "#e8c860", fontWeight: 500 }}>{email}</span> создан
+                Аккаунт <span style={{ color: "#e8c860", fontWeight: 500 }}>{name.trim() || ("@" + username.trim().toLowerCase())}</span> создан
                 и ожидает одобрения администратором. После одобрения вы сможете войти.
               </p>
               <button
@@ -1708,15 +1749,39 @@ function AuthScreen({ onAuthenticated, onError }) {
                 {mode === "signin" ? "Вход в систему" : "Регистрация"}
               </div>
 
-              <Field label="Email">
-                <StyledInput
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </Field>
+              {mode === "signin" ? (
+                <Field label="Логин или email">
+                  <StyledInput
+                    type="text"
+                    autoComplete="username"
+                    value={loginId}
+                    onChange={e => setLoginId(e.target.value)}
+                    placeholder="ivan или you@example.com"
+                    onKeyDown={e => { if (e.key === "Enter") submit(); }}
+                  />
+                </Field>
+              ) : (
+                <>
+                  <Field label="Имя">
+                    <StyledInput
+                      type="text"
+                      autoComplete="name"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                      placeholder="Иван Петров"
+                    />
+                  </Field>
+                  <Field label="Логин">
+                    <StyledInput
+                      type="text"
+                      autoComplete="username"
+                      value={username}
+                      onChange={e => setUsername(e.target.value)}
+                      placeholder="латиница, без пробелов"
+                    />
+                  </Field>
+                </>
+              )}
 
               <Field label="Пароль">
                 <StyledInput
@@ -7641,7 +7706,7 @@ function AdminPage({ profile, client, showToast }) {
                         }}>ЖДЁТ</span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 1 }}>{u.email}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 1 }}>{displayLogin(u.email)}</div>
                     <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginTop: 2 }}>
                       {u.projects_count} проектов · {u.transactions_count} транзакций
                       {u.created_at && <> · с {new Date(u.created_at).toLocaleDateString("ru-RU")}</>}
