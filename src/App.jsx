@@ -5,7 +5,7 @@ import { diffLines } from "./lib/lineDiff";
 import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
 import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals, projectIncomeTxs, viewerShareOnProject, portfolioMineTotal } from "./lib/dashboardMetrics";
 import { dueState, dueSuffix, DUE_COLORS, PRIORITY_ORDER, tasksAttention } from "./lib/taskUi.js";
-import { projectRemaining, paymentsByProject as groupPaymentsByProject } from "./lib/clientMetrics.js";
+import { projectRemaining, paymentsByProject as groupPaymentsByProject, clientTotals, attentionTasks } from "./lib/clientMetrics.js";
 import NotificationBell from "./components/NotificationBell";
 import MagneticButton from "./components/MagneticButton";
 import CommandPalette from "./components/CommandPalette";
@@ -7324,8 +7324,88 @@ function ClientProjectTasksModal({ order, client, showToast, onClose, onChanged 
   );
 }
 
-// TODO Task 8 — заглушка: заменить на реальный ClientDashboard
-const ClientDashboard = () => <div style={{ padding: 24, color: "#cfcfca" }}>Дашборд заказчика — заглушка (Task 8)</div>;
+// Task 8 — вкладка «Дашборд» заказчика
+function ClientDashboard({ projects = [], client, showToast, onOpenTask }) {
+  const [attn, setAttn] = useState(null); // null = загрузка, [] = пусто, [...] = задачи
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const all = await fetchTasks(client, { projectId: null });
+        const ids = new Set(projects.map(p => p.id));
+        setAttn(attentionTasks(all.filter(t => ids.has(t.projectId))));
+      } catch (e) {
+        showToast?.("Ошибка загрузки задач: " + (e.message || ""), "error");
+        setAttn([]);
+      }
+    })();
+    /* eslint-disable-next-line */
+  }, []);
+
+  const totals = clientTotals(projects);
+  const today = todayStr();
+  const active = projects.filter(p => !["Оплачен", "Архив"].includes(p.stage));
+  const next = active
+    .filter(p => p.deadline && p.deadline >= today)
+    .sort((a, b) => a.deadline.localeCompare(b.deadline))[0];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+
+      {/* KPI ×4 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }}>
+        <KpiCard label="Активных заказов" value={totals.activeCount} Icon={FolderKanban} color="#d4af37" sub={`всего: ${projects.length}`} />
+        <KpiCard label="Всего оплачено"   value={totals.totalPaid}      Icon={Wallet}        color="#6ee7a8" format={fmt} />
+        <KpiCard label="Остаток"           value={totals.totalRemaining} Icon={Wallet}        color="#f3d77b" format={fmt} />
+        <KpiCard label="Открытых задач"    value={totals.openTasks}      Icon={ListTodo}      color="#7cc5ff" />
+      </div>
+
+      {/* Ближайший дедлайн */}
+      <div className="glass-card" style={{ borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+          Ближайший дедлайн
+        </div>
+        {next ? (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 14, color: "#fafaf7" }}>{next.name}</span>
+            <span style={{ fontSize: 13, color: "#f3d77b", fontVariantNumeric: "tabular-nums" }}>{fmtD(next.deadline)}</span>
+          </div>
+        ) : (
+          <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>Нет ближайших сроков</span>
+        )}
+      </div>
+
+      {/* Требует внимания */}
+      <div className="glass-card" style={{ borderRadius: 12, padding: "14px 16px", border: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#f8a3a3", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 8 }}>
+          ⚠ Требует внимания
+        </div>
+        {attn === null ? (
+          <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>Загрузка…</span>
+        ) : attn.length === 0 ? (
+          <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>Нет задач на проверке</span>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {attn.map(t => (
+              <div
+                key={t.id}
+                onClick={onOpenTask}
+                style={{ padding: "10px 12px", borderRadius: 10, background: "#141414",
+                  border: "1px solid rgba(255,255,255,0.05)", cursor: "pointer" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 14, color: "#fafaf7" }}>{t.title}</span>
+                  <span style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{t.projectName}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
 // Task 5 — вкладка «Проекты» заказчика (на базе ClientOrdersPage)
 function ClientProjects({ orders, client, profile, showToast, onChanged }) {
   const [creating, setCreating] = useState(false);
@@ -9656,7 +9736,7 @@ export default function App() {
             {isVisitor ? <VisitorEmptyTab tab={effectiveTab} /> : clientView ? (
               /* Изолированная зона заказчика — сотрудничьи компоненты не монтируются */
               <>
-                {effectiveTab === "dashboard" && <ClientDashboard />}
+                {effectiveTab === "dashboard" && <ClientDashboard projects={clientProjects} client={supabase} showToast={showToast} onOpenTask={() => setTab("tasks")} />}
                 {effectiveTab === "projects"  && <ClientProjects orders={clientProjects} client={supabase} profile={profile} showToast={showToast} onChanged={async () => { try { setClientProjects(await fetchMyClientProjects(supabase)); } catch (e) {} }} />}
                 {effectiveTab === "tasks"     && <ClientTasks projects={clientProjects} client={supabase} showToast={showToast} />}
                 {effectiveTab === "finance"   && <ClientFinance projects={clientProjects} payments={clientPayments} />}
