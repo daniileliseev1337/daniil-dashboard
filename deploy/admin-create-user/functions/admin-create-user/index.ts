@@ -16,7 +16,8 @@ const j = (b: unknown, s = 200): Response =>
 function getUserId(auth: string): string | null {
   try {
     const p = auth.replace(/^Bearer\s+/i, "").split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(p)).sub ?? null;
+    const sub = JSON.parse(atob(p)).sub;
+    return (typeof sub === "string" && /^[0-9a-f-]{36}$/i.test(sub)) ? sub : null;
   } catch { return null; }
 }
 
@@ -63,7 +64,7 @@ Deno.serve(async (req) => {
   });
   const created = await cr.json().catch(() => ({}));
   if (!cr.ok || !created?.id) {
-    return j({ ok: false, stage: "create", message: created?.msg || created?.error_description || `gotrue ${cr.status}` }, 400);
+    return j({ ok: false, stage: "create", message: created?.msg || created?.error_description || `gotrue ${cr.status}` }, cr.status && cr.status >= 400 ? cr.status : 400);
   }
   const userId = created.id as string;
 

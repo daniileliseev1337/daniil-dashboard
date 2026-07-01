@@ -626,8 +626,8 @@ async function fetchMyClientProjects(client) {
 }
 
 // D роль заказчика: история платежей по проектам (безопасная проекция, Task 3).
-async function fetchMyProjectPayments(supabase) {
-  const { data, error } = await supabase.rpc('get_my_project_payments');
+async function fetchMyProjectPayments(client) {
+  const { data, error } = await client.rpc('get_my_project_payments');
   if (error) throw error;
   return data ?? [];
 }
@@ -7341,16 +7341,20 @@ function ClientDashboard({ projects = [], client, showToast, onOpenTask }) {
   const [attn, setAttn] = useState(null); // null = загрузка, [] = пусто, [...] = задачи
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const all = await fetchTasks(client, { projectId: null });
         const ids = new Set(projects.map(p => p.id));
-        setAttn(attentionTasks(all.filter(t => ids.has(t.projectId))));
+        if (!cancelled) setAttn(attentionTasks(all.filter(t => ids.has(t.projectId))));
       } catch (e) {
-        showToast?.("Ошибка загрузки задач: " + (e.message || ""), "error");
-        setAttn([]);
+        if (!cancelled) {
+          showToast?.("Ошибка загрузки задач: " + (e.message || ""), "error");
+          setAttn([]);
+        }
       }
     })();
+    return () => { cancelled = true; };
     /* eslint-disable-next-line */
   }, []);
 
@@ -7515,7 +7519,19 @@ function ClientTasks({ projects, client, showToast }) {
     try { setTasks(await fetchTasks(client, { projectId: null })); }
     catch (e) { showToast("Ошибка задач: " + (e.message || ""), "error"); setTasks([]); }
   };
-  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchTasks(client, { projectId: null });
+        if (!cancelled) setTasks(data);
+      } catch (e) {
+        if (!cancelled) { showToast("Ошибка задач: " + (e.message || ""), "error"); setTasks([]); }
+      }
+    })();
+    return () => { cancelled = true; };
+    /* eslint-disable-next-line */
+  }, []);
 
   async function setStatus(taskId, status) {
     setBusyId(taskId);
@@ -7613,7 +7629,7 @@ function ClientFinance({ projects = [], payments = [] }) {
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
                 <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>История платежей</div>
                 {hist.items.map((pay, i) => (
-                  <div key={i} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                  <div key={`${pay.paid_on}-${i}`} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
                     {pay.paid_on} · <b style={{ color: "#6ee7a8" }}>{money(pay.amount)} ₽</b>
                   </div>
                 ))}
@@ -9529,7 +9545,7 @@ export default function App() {
             )}
             {/* Система ролей Ф1: переключатель вида (если есть рабочая роль и роль заказчика) */}
             {canSwitchView && (
-              <button onClick={() => { const m = viewMode === "client" ? "work" : "client"; setViewMode(m); try { localStorage.setItem("km_view_mode", m); } catch {} ; setTab(m === "client" ? "dashboard" : "dashboard"); }}
+              <button onClick={() => { const m = viewMode === "client" ? "work" : "client"; setViewMode(m); try { localStorage.setItem("km_view_mode", m); } catch {} ; setTab("dashboard"); }}
                 title="Переключить вид: кабинет сотрудника / портал заказчика"
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 10px", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, background: "rgba(212,175,55,0.10)", border: "1px solid rgba(212,175,55,0.30)", color: "#d4af37" }}>
                 {viewMode === "client" ? "Портал заказчика" : "Кабинет сотрудника"}

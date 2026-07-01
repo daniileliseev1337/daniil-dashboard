@@ -12,6 +12,7 @@ describe('validateNewUser', () => {
   });
   it('короткий пароль', () => {
     expect(validateNewUser({ email:'a@b.co', password:'short', role:'client' })).toContain('password');
+    expect(validateNewUser({ email:'a@b.co', password:'1234567', role:'client' })).toContain('password');
   });
   it('недопустимая роль', () => {
     expect(validateNewUser({ email:'a@b.co', password:'12345678', role:'visitor' })).toContain('role');
