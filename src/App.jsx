@@ -7414,8 +7414,75 @@ function ClientProjects({ orders, client, profile, showToast, onChanged }) {
     </div>
   );
 }
-// TODO Task 6 — заглушка: заменить на реальный ClientTasks
-const ClientTasks = () => <div style={{ padding: 24, color: "#cfcfca" }}>Задачи заказчика — заглушка (Task 6)</div>;
+// Task 6 — вкладка «Задачи» заказчика
+function ClientTasks({ projects, client, showToast }) {
+  const [tasks, setTasks] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const reload = async () => {
+    try { setTasks(await fetchTasks(client, { projectId: null })); }
+    catch (e) { showToast("Ошибка задач: " + (e.message || ""), "error"); setTasks([]); }
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, []);
+
+  async function setStatus(taskId, status) {
+    setBusyId(taskId);
+    try {
+      await clientSetTaskStatus(client, taskId, status);
+      showToast(status === "Готово" ? "✓ Задача принята" : "Задача возвращена в работу");
+      await reload();
+    } catch (e) {
+      showToast("Ошибка: " + (e.message || ""), "error");
+    } finally { setBusyId(null); }
+  }
+
+  const statusColor = s =>
+    s === "Готово" ? "#6ee7a8" : s === "На проверке" ? "#f3d77b" : s === "В работе" ? "#7cc5ff" : "var(--text-tertiary)";
+
+  if (tasks === null) return <div style={{ color: "var(--text-secondary)", fontSize: 14, padding: 24 }}>Загрузка…</div>;
+
+  const ids = new Set((projects || []).map(p => p.id));
+  const filtered = tasks.filter(t => ids.has(t.projectId));
+
+  if (!filtered.length) return <Empty text="Задач пока нет" />;
+
+  // группировка по проекту в порядке projects
+  const groups = (projects || [])
+    .map(p => ({ project: p, tasks: filtered.filter(t => t.projectId === p.id) }))
+    .filter(g => g.tasks.length > 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <span style={{ fontSize: 13, color: "var(--text-tertiary)" }}>Мои задачи</span>
+      {groups.map(({ project, tasks: pts }) => (
+        <div key={project.id} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)",
+            textTransform: "uppercase", letterSpacing: "0.06em", paddingBottom: 2,
+            borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+            {project.name}
+          </div>
+          {pts.map(t => (
+            <div key={t.id} style={{ padding: "10px 12px", borderRadius: 10, background: "#141414",
+              border: "1px solid rgba(255,255,255,0.05)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 14, color: "#fafaf7" }}>{t.title}</span>
+                <span style={{ fontSize: 12, color: statusColor(t.status) }}>{t.status}</span>
+              </div>
+              {t.status === "На проверке" && (
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button className={BTN.primary} disabled={busyId === t.id}
+                          onClick={() => setStatus(t.id, "Готово")} style={{ opacity: busyId === t.id ? 0.6 : 1 }}>Принять</button>
+                  <button className={BTN.ghost} disabled={busyId === t.id}
+                          onClick={() => setStatus(t.id, "В работе")} style={{ opacity: busyId === t.id ? 0.6 : 1 }}>Вернуть</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 // TODO Task 7 — заглушка: заменить на реальный ClientFinance
 const ClientFinance = () => <div style={{ padding: 24, color: "#cfcfca" }}>Финансы заказчика — заглушка (Task 7)</div>;
 // Алиас: оба сценария (вкладка «Проекты» заказчика + myorders) используют один компонент
@@ -9540,7 +9607,7 @@ export default function App() {
               <>
                 {effectiveTab === "dashboard" && <ClientDashboard />}
                 {effectiveTab === "projects"  && <ClientProjects orders={clientProjects} client={supabase} profile={profile} showToast={showToast} onChanged={async () => { try { setClientProjects(await fetchMyClientProjects(supabase)); } catch (e) {} }} />}
-                {effectiveTab === "tasks"     && <ClientTasks />}
+                {effectiveTab === "tasks"     && <ClientTasks projects={clientProjects} client={supabase} showToast={showToast} />}
                 {effectiveTab === "finance"   && <ClientFinance />}
                 {/* myorders — два активных использования (заказчик + сотрудник-гибрид) */}
                 {effectiveTab === "myorders"  && <ClientOrdersPage orders={clientProjects} client={supabase} profile={profile} showToast={showToast} onChanged={async () => { try { setClientProjects(await fetchMyClientProjects(supabase)); } catch (e) {} }} />}
