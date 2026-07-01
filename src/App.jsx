@@ -5,7 +5,7 @@ import { diffLines } from "./lib/lineDiff";
 import { isPushSupported, getPushState, enablePush, disablePush } from "./lib/push";
 import { periodRange, prevPeriodRange, granularityFor, periodBalance, trendDir, financeSeries, expenseByCategory, receivables, myTasks, ownerReceived, mySharesTotals, myProjectIncomeForMonth, selectionTotals, projectIncomeTxs, viewerShareOnProject, portfolioMineTotal } from "./lib/dashboardMetrics";
 import { dueState, dueSuffix, DUE_COLORS, PRIORITY_ORDER, tasksAttention } from "./lib/taskUi.js";
-import { projectRemaining } from "./lib/clientMetrics.js";
+import { projectRemaining, paymentsByProject as groupPaymentsByProject } from "./lib/clientMetrics.js";
 import NotificationBell from "./components/NotificationBell";
 import MagneticButton from "./components/MagneticButton";
 import CommandPalette from "./components/CommandPalette";
@@ -7483,8 +7483,59 @@ function ClientTasks({ projects, client, showToast }) {
     </div>
   );
 }
-// TODO Task 7 — заглушка: заменить на реальный ClientFinance
-const ClientFinance = () => <div style={{ padding: 24, color: "#cfcfca" }}>Финансы заказчика — заглушка (Task 7)</div>;
+// Task 7 — вкладка «Финансы» заказчика
+function ClientFinance({ projects = [], payments = [] }) {
+  const money = n => (Number(n) || 0).toLocaleString("ru-RU");
+  const byProj = groupPaymentsByProject(payments);
+  const totalPaid      = projects.reduce((s, p) => s + (+p.paidAmount  || 0), 0);
+  const totalRemaining = projects.reduce((s, p) => s + projectRemaining(p),   0);
+
+  if (!projects.length) return <Empty text="Проектов пока нет" />;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Итоговая плашка */}
+      <div style={{ padding: "12px 16px", borderRadius: 12, background: "#141414",
+        border: "1px solid rgba(255,255,255,0.05)", fontSize: 13, display: "flex", gap: 20, flexWrap: "wrap" }}>
+        <span style={{ color: "var(--text-secondary)" }}>
+          Всего оплачено: <b style={{ color: "#6ee7a8" }}>{money(totalPaid)} ₽</b>
+        </span>
+        <span style={{ color: "var(--text-secondary)" }}>
+          Остаток: <b style={{ color: "#f3d77b" }}>{money(totalRemaining)} ₽</b>
+        </span>
+      </div>
+
+      {/* Карточки по проектам */}
+      {projects.map(p => {
+        const hist = byProj[p.id];
+        return (
+          <div key={p.id} style={{ padding: "14px 16px", borderRadius: 12, background: "#141414",
+            border: "1px solid rgba(255,255,255,0.05)" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#fafaf7", marginBottom: 10 }}>{p.name}</div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13, color: "var(--text-secondary)" }}>
+              <span>Договор: <b style={{ color: "#fafaf7" }}>{money(p.contractSum)} ₽</b></span>
+              <span>Оплачено: <b style={{ color: "#6ee7a8" }}>{money(p.paidAmount)} ₽</b></span>
+              <span>Остаток: <b style={{ color: "#f3d77b" }}>{money(projectRemaining(p))} ₽</b></span>
+            </div>
+            {hist?.items?.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 2 }}>История платежей</div>
+                {hist.items.map((pay, i) => (
+                  <div key={i} style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+                    {pay.paid_on} · <b style={{ color: "#6ee7a8" }}>{money(pay.amount)} ₽</b>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!hist?.items?.length && (
+              <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-tertiary)" }}>Платежей нет</div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 // Алиас: оба сценария (вкладка «Проекты» заказчика + myorders) используют один компонент
 const ClientOrdersPage = ClientProjects;
 
@@ -9608,7 +9659,7 @@ export default function App() {
                 {effectiveTab === "dashboard" && <ClientDashboard />}
                 {effectiveTab === "projects"  && <ClientProjects orders={clientProjects} client={supabase} profile={profile} showToast={showToast} onChanged={async () => { try { setClientProjects(await fetchMyClientProjects(supabase)); } catch (e) {} }} />}
                 {effectiveTab === "tasks"     && <ClientTasks projects={clientProjects} client={supabase} showToast={showToast} />}
-                {effectiveTab === "finance"   && <ClientFinance />}
+                {effectiveTab === "finance"   && <ClientFinance projects={clientProjects} payments={clientPayments} />}
                 {/* myorders — два активных использования (заказчик + сотрудник-гибрид) */}
                 {effectiveTab === "myorders"  && <ClientOrdersPage orders={clientProjects} client={supabase} profile={profile} showToast={showToast} onChanged={async () => { try { setClientProjects(await fetchMyClientProjects(supabase)); } catch (e) {} }} />}
               </>
